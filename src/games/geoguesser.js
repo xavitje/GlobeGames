@@ -371,11 +371,11 @@ function showSoloResultOverlay(km, pts) {
     const rmap = L.map(mapEl, { zoomControl: true, worldCopyJump: true });
     gg.resultMap = rmap;
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://carto.com">CARTO</a>',
-      maxZoom: 19,
-      subdomains: "abcd",
-    }).addTo(rmap);
+    // Esri World Street Map — English labels, free, no key, very detailed
+    L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      { attribution: "Tiles © Esri", maxZoom: 19 },
+    ).addTo(rmap);
 
     const answerLatLng = [gg.current.lat, gg.current.lng];
     const guessLatLng = [gg.guess[1], gg.guess[0]];
@@ -874,11 +874,11 @@ function drawMpResultsScreen(payload) {
     const rmap = L.map(mapEl, { zoomControl: true, worldCopyJump: true });
     gg.resultMap = rmap;
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://carto.com">CARTO</a>',
-      maxZoom: 19,
-      subdomains: "abcd",
-    }).addTo(rmap);
+    // Esri World Street Map — English labels, free, no key, very detailed
+    L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      { attribution: "Tiles © Esri", maxZoom: 19 },
+    ).addTo(rmap);
 
     const answerLatLng = [payload.answer.lat, payload.answer.lng];
     const allPoints = [answerLatLng];
@@ -1058,24 +1058,29 @@ async function initPanorama(round) {
 function initMap() {
   const container = document.getElementById("ggLeafletMap");
   if (!container) return;
+
+  // Add dark-invert class so CSS can flip OSM tiles to dark theme
+  container.classList.add("gg-map-dark");
+
   const map = L.map(container, { center: [20, 10], zoom: 2, minZoom: 1, worldCopyJump: true, zoomControl: false });
   gg.map = map;
 
   L.control.zoom({ position: "bottomleft" }).addTo(map);
 
-  // CartoDB Dark Matter — English labels, dark theme, very detailed
-  const CARTO_DARK = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-  // CartoDB Voyager (light) for satellite toggle label layer
-  const ESRI_SAT   = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-  const ESRI_SAT_LABEL = "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
-
-  const streetLayer = L.tileLayer(CARTO_DARK, {
-    attribution: '&copy; <a href="https://carto.com">CARTO</a>',
+  // OSM tiles — free, no key, dark appearance via CSS filter on .gg-map-dark
+  const streetLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>',
     maxZoom: 19,
-    subdomains: "abcd",
   });
-  const satelliteBase = L.tileLayer(ESRI_SAT, { attribution: "Tiles © Esri", maxZoom: 19 });
-  const satelliteLabels = L.tileLayer(ESRI_SAT_LABEL, { maxZoom: 19, opacity: 0.85 });
+  // Satellite: Esri World Imagery (free, no key) + English labels overlay
+  const satelliteBase = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Tiles © Esri", maxZoom: 19 },
+  );
+  const satelliteLabels = L.tileLayer(
+    "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, opacity: 0.85 },
+  );
   const satelliteLayer = L.layerGroup([satelliteBase, satelliteLabels]);
 
   streetLayer.addTo(map);

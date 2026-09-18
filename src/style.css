@@ -706,6 +706,15 @@ code {
   cursor: crosshair;
   background: #1a2234;
 }
+/* Dark theme for OSM tiles — inverts light map to dark without needing an API key */
+.gg-map-dark .leaflet-tile {
+  filter: invert(1) hue-rotate(180deg) brightness(0.88) contrast(0.92) saturate(0.7);
+}
+/* Keep marker/overlay layers un-inverted */
+.gg-map-dark .leaflet-pane:not(.leaflet-tile-pane),
+.gg-map-dark .leaflet-control {
+  filter: invert(1) hue-rotate(180deg);
+}
 .gg-map-corner.expanded .gg-leaflet-map {
   height: 300px;
 }
