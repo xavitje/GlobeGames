@@ -532,6 +532,11 @@ code {
 #glSphere {
   filter: drop-shadow(0 8px 18px rgba(10, 15, 25, 0.35));
 }
+/* =============================================
+   GeoGuesser – Fullscreen Round Layout
+   ============================================= */
+
+/* Spinner (reused for loading states) */
 .ggphoto-wrap {
   background: #000;
   border: 1px solid var(--border);
@@ -543,82 +548,278 @@ code {
   justify-content: center;
   position: relative;
 }
-.ggphoto-wrap img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
 .ggphoto-wrap.loading {
   flex-direction: column;
   gap: 12px;
   background: var(--panel2);
 }
 .ggspinner {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  border: 3px solid var(--border);
+  border: 3px solid rgba(255,255,255,0.2);
   border-top-color: var(--accent);
-  animation: ggspin 0.8s linear infinite;
+  animation: ggspin 0.75s linear infinite;
 }
 @keyframes ggspin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
-.ggpano-badge {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-.ggmap-wrap {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px;
+
+/* ---------- Fullscreen wrapper ---------- */
+.gg-fullscreen-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
   overflow: hidden;
-  position: relative;
+  background: #000;
 }
-.ggmap-wrap #ggLeafletMap {
+
+/* Panorama fills the entire screen */
+.gg-pano-container {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 340px;
-  border-radius: calc(var(--radius) - 4px);
-  cursor: crosshair;
-  background: var(--ocean-lo);
+  height: 100%;
 }
+
+/* ---------- Top HUD ---------- */
+.gg-hud-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* subtle gradient so pills are readable over panorama */
+  background: linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 100%);
+  pointer-events: none;
+}
+.gg-hud-top > * {
+  pointer-events: auto;
+}
+.gg-hud-back-btn {
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.15s;
+}
+.gg-hud-back-btn:hover {
+  background: rgba(0,0,0,0.75);
+}
+.gg-hud-pill {
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+.gg-hud-score {
+  color: #a8f0d0;
+}
+.gg-hud-force {
+  cursor: pointer;
+  border: none;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+/* ---------- Floating map corner ---------- */
+.gg-map-corner {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  z-index: 300;
+  width: 310px;
+  background: rgba(15, 16, 22, 0.88);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.25s cubic-bezier(0.4,0,0.2,1),
+              height 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+.gg-map-corner.expanded {
+  width: 460px;
+}
+
+.gg-map-corner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 6px;
+  gap: 8px;
+}
+.gg-map-guess-info {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gg-map-expand-btn {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.gg-map-expand-btn:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.gg-map-inner {
+  position: relative;
+  flex: 1;
+}
+.gg-leaflet-map {
+  width: 100%;
+  height: 210px;
+  cursor: crosshair;
+  background: #1a2234;
+}
+.gg-map-corner.expanded .gg-leaflet-map {
+  height: 300px;
+}
+
+/* Layer toggle positioned inside map corner */
 .gg-layer-toggle {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 8px;
+  right: 8px;
   z-index: 1000;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: rgba(15,16,22,0.75);
+  border: 1px solid rgba(255,255,255,0.15);
   border-radius: 999px;
-  padding: 4px;
+  padding: 3px;
   display: flex;
   gap: 2px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  backdrop-filter: blur(6px);
 }
 .gg-layer-toggle button {
   border: none;
   background: transparent;
-  color: var(--sub);
-  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+  font-size: 11px;
   font-weight: 700;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 999px;
   cursor: pointer;
 }
 .gg-layer-toggle button.active {
   background: var(--accent);
   color: #fff;
+}
+
+.gg-map-footer {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gg-submit-btn {
+  width: 100%;
+  padding: 11px;
+  font-size: 14px;
+  border-radius: 12px;
+}
+.gg-submit-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- Settings UI (solo/mp screens) ---------- */
+.gg-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sub);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 8px;
+}
+.gg-pill-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gg-pill-btn {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.gg-pill-btn:hover {
+  border-color: var(--accent);
+}
+.gg-pill-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.gg-select-wrap {
+  position: relative;
+}
+.gg-select-wrap::after {
+  content: "▾";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--sub);
+  font-size: 13px;
+}
+.gg-select {
+  width: 100%;
+  padding: 10px 36px 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  outline: none;
+}
+.gg-select:focus {
+  border-color: var(--accent);
 }
 .small {
   font-size: 12px;
