@@ -700,27 +700,18 @@ code {
   position: relative;
   flex: 1;
 }
-.gg-leaflet-map {
+.gg-guess-map {
   width: 100%;
   height: 210px;
   cursor: crosshair;
   background: #1a2234;
 }
-/* Dark theme for OSM tiles — inverts light map to dark without needing an API key */
-.gg-map-dark .leaflet-tile {
-  filter: invert(1) hue-rotate(180deg) brightness(0.88) contrast(0.92) saturate(0.7);
-}
-/* Keep marker/overlay layers un-inverted */
-.gg-map-dark .leaflet-pane:not(.leaflet-tile-pane),
-.gg-map-dark .leaflet-control {
-  filter: invert(1) hue-rotate(180deg);
-}
-.gg-map-corner.expanded .gg-leaflet-map {
+.gg-map-corner.expanded .gg-guess-map {
   height: 300px;
 }
 
 /* Layer toggle positioned inside map corner */
-.gg-layer-toggle {
+.gg-map-type-toggle {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -734,7 +725,7 @@ code {
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   backdrop-filter: blur(6px);
 }
-.gg-layer-toggle button {
+.gg-map-type-toggle button {
   border: none;
   background: transparent;
   color: rgba(255,255,255,0.65);
@@ -744,7 +735,7 @@ code {
   border-radius: 999px;
   cursor: pointer;
 }
-.gg-layer-toggle button.active {
+.gg-map-type-toggle button.active {
   background: var(--accent);
   color: #fff;
 }
