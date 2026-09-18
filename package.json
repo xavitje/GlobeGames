@@ -1,0 +1,24 @@
+{
+  "name": "globegames",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/build-geo.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/build-geo.mjs",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@turf/bbox": "^7.2.0",
+    "@turf/simplify": "^7.2.0",
+    "d3-geo": "^3.1.1",
+    "d3-interpolate": "^3.0.1",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}
