@@ -1,1 +1,310 @@
-import { geoEquirectangular, geoPath } from "d3-geo"; import { COUNTRY_DATA } from "../data/countries.js"; import { GEO_POINTS } from "../data/geoPoints.js"; import { ALL_NAMES, loadWorld, worldByName, haversineKm, flagEmoji, topbar } from "../core.js"; const MAPILLARY_TOKEN = import.meta.env.VITE_MAPILLARY_TOKEN || ""; let app, gg = null; function weightedRandomPoint() { const countries = ALL_NAMES.filter(n => GEO_POINTS[n] && GEO_POINTS[n].length), country = countries[Math.floor(Math.random() * countries.length)], pts = GEO_POINTS[country], weighted = []; pts.forEach((p, i) => { const w = 0 === i ? 3 : 1; for (let k = 0; k < w; k++)weighted.push(p) }); return { country: country, ...weighted[Math.floor(Math.random() * weighted.length)] } } async function fetchMapillaryImage(lon, lat) { const radii = [.015, .025, .035, .045]; for (const r of radii) { const jLon = lon + (Math.random() - .5) * r, jLat = lat + (Math.random() - .5) * r, bbox = [jLon - r, jLat - r, jLon + r, jLat + r].join(","), url = `https://graph.mapillary.com/images?access_token=${encodeURIComponent(MAPILLARY_TOKEN)}&fields=id,computed_geometry,thumb_2048_url,is_pano&bbox=${bbox}&limit=20`; try { const res = await fetch(url); if (!res.ok) continue; const data = await res.json(), items = data && data.data || []; if (items.length) { const pick = items[Math.floor(Math.random() * items.length)], coords = pick.computed_geometry && pick.computed_geometry.coordinates; if (coords && pick.thumb_2048_url) return { imageUrl: pick.thumb_2048_url, lon: coords[0], lat: coords[1], isPano: !!pick.is_pano } } } catch (e) { } } return null } export function renderGeoGuesser(rootEl) { app = rootEl, MAPILLARY_TOKEN ? (gg = { round: 0, totalScore: 0, history: [], current: null, guess: null, loading: !0 }, drawLoading(), nextRound()) : app.innerHTML = `${topbar()}\n      <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Even instellen voordat je kunt spelen.</div></div></div>\n      <div class="card" style="cursor:default;">\n        <span class="icon">🔑</span>\n        <h3>Mapillary-token ontbreekt</h3>\n        <p style="margin-bottom:10px;">Dit spel gebruikt gratis straatfoto's van <a class="linklike" href="https://www.mapillary.com/developer" target="_blank" rel="noopener">Mapillary</a>. Maak daar gratis een account + app aan, kopieer de <em>Client Token</em> en zet die in <code>.env</code> (lokaal) of bij je Vercel project als omgevingsvariabele:</p>\n        <div class="small" style="background:var(--panel2); padding:10px 12px; border-radius:10px; font-family:monospace;">VITE_MAPILLARY_TOKEN=MLY|jouw-token</div>\n        <p class="small" style="margin-top:10px;">Na het instellen: lokaal opnieuw <code>npm run dev</code> starten, of op Vercel opnieuw deployen.</p>\n      </div>\n    ` } function drawLoading() { app.innerHTML = `\n    ${topbar()}\n    <div class="gametitle">\n      <div><h2>📍 GeoGuesser</h2><div class="desc">Ronde ${gg.round + 1} van 5</div></div>\n      <div class="pillrow"><span class="pill">Score: <span class="n">${gg.totalScore}</span></span></div>\n    </div>\n    <div class="ggphoto-wrap loading">\n      <div class="ggspinner"></div>\n      <div class="small">Straatfoto zoeken...</div>\n    </div>\n  ` } async function nextRound() { gg.round++, gg.guess = null, drawLoading(); const round = await async function (attempts = 18) { for (let i = 0; i < attempts; i++) { const p = weightedRandomPoint(), img = await fetchMapillaryImage(p.lon, p.lat); if (img) return { ...img, countryHint: p.country } } return null }(); round ? (gg.current = round, await loadWorld(), app.innerHTML = `\n    ${topbar()}\n    <div class="gametitle">\n      <div><h2>📍 GeoGuesser</h2><div class="desc">Waar op aarde is deze foto genomen?</div></div>\n      <div class="pillrow">\n        <span class="pill">Ronde <span class="n">${gg.round}</span>/5</span>\n        <span class="pill">Score: <span class="n">${gg.totalScore}</span></span>\n      </div>\n    </div>\n    <div class="ggphoto-wrap">\n      <img src="${gg.current.imageUrl}" alt="Straatfoto" />\n      ${gg.current.isPano ? '<span class="ggpano-badge">360° foto</span>' : ""}\n    </div>\n    <div class="small" style="margin:8px 0 4px;">Klik op de kaart om je gok te plaatsen.</div>\n    <div class="ggmap-wrap" id="ggMapWrap"></div>\n    <div class="footerrow">\n      <div class="small" id="ggGuessInfo">${gg.guess ? "Gok geplaatst ✓" : "Nog geen gok geplaatst"}</div>\n      <button class="btn primary" id="ggSubmitBtn" ${gg.guess ? "" : "disabled"} onclick="ggSubmitGuess()">Bevestig gok</button>\n    </div>\n  `, function () { const container = document.getElementById("ggMapWrap"), projection = geoEquirectangular().fitSize([520, 300], { type: "Sphere" }), path = geoPath(projection), WORLD_BY_NAME = worldByName(); let landPaths = ""; Object.values(WORLD_BY_NAME).forEach(f => { const d = path(f); d && (landPaths += `<path class="ggland" d="${d}"></path>`) }), container.innerHTML = `<svg id="ggMapSvg" viewBox="0 0 520 300" width="100%" style="cursor:crosshair;">\n    <rect class="ggocean" x="0" y="0" width="520" height="300"></rect>\n    ${landPaths}\n    <g id="ggMarkers"></g>\n  </svg>`, gg.mapProjection = projection; const svg = document.getElementById("ggMapSvg"); svg.addEventListener("click", e => { if (gg.submitted) return; const rect = svg.getBoundingClientRect(), x = (e.clientX - rect.left) / rect.width * 520, y = (e.clientY - rect.top) / rect.height * 300, lonlat = projection.invert([x, y]); lonlat && (gg.guess = lonlat, renderMarkers(), document.getElementById("ggGuessInfo").textContent = "Gok geplaatst ✓", document.getElementById("ggSubmitBtn").removeAttribute("disabled")) }), renderMarkers() }()) : app.innerHTML = `${topbar()}\n      <div class="gametitle"><div><h2>📍 GeoGuesser</h2></div></div>\n      <div class="card" style="cursor:default;">\n        <span class="icon">📡</span>\n        <h3>Geen straatfoto's gevonden</h3>\n        <p>Er kon geen Mapillary-dekking gevonden worden na meerdere pogingen. Probeer het nog eens.</p>\n        <button class="btn primary" onclick="ggNewGame()" style="margin-top:10px;">Opnieuw proberen</button>\n      </div>` } function renderMarkers() { const g = document.getElementById("ggMarkers"); if (!g || !gg.mapProjection) return; let html = ""; if (gg.guess) { const [x, y] = gg.mapProjection(gg.guess); html += `<circle class="ggpin ggpin-guess" cx="${x}" cy="${y}" r="5"></circle>` } if (gg.submitted) { const [ax, ay] = gg.mapProjection([gg.current.lon, gg.current.lat]); if (html += `<circle class="ggpin ggpin-answer" cx="${ax}" cy="${ay}" r="5"></circle>`, gg.guess) { const [gx, gy] = gg.mapProjection(gg.guess); html += `<line class="ggline" x1="${gx}" y1="${gy}" x2="${ax}" y2="${ay}"></line>` } } g.innerHTML = html } window.ggSubmitGuess = function () { if (!gg.guess) return; gg.submitted = !0; const km = haversineKm(gg.guess, [gg.current.lon, gg.current.lat]), pts = function (km) { return km < 20 ? 5e3 : Math.max(0, Math.round(5e3 * Math.exp(-km / 2e3))) }(km); gg.totalScore += pts, gg.history.push({ km: km, pts: pts, country: gg.current.countryHint }), renderMarkers(), document.getElementById("ggSubmitBtn").outerHTML = "", document.getElementById("ggGuessInfo").innerHTML = `📏 ${Math.round(km).toLocaleString()} km van de juiste plek — <strong>${pts} punten</strong>`; const footer = document.querySelector(".footerrow"), btn = document.createElement("button"); btn.className = "btn primary", btn.textContent = gg.round < 5 ? "Volgende ronde →" : "Bekijk eindscore", btn.onclick = () => gg.round < 5 ? nextRound() : function () { const avg = Math.round(gg.totalScore / 5); app.innerHTML = `\n    ${topbar()}\n    <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Eindresultaat</div></div></div>\n    <div class="card" style="cursor:default; text-align:center;">\n      <span class="icon">🏁</span>\n      <h3>${gg.totalScore} / 25000 punten</h3>\n      <p>Gemiddeld ${avg} punten per ronde.</p>\n    </div>\n    <div class="guesslist" style="margin-top:14px;">\n      ${gg.history.map((h, i) => `<div class="gitem">\n          <div class="name">Ronde ${i + 1} · ${h.country}</div>\n          <div class="dist">${Math.round(h.km).toLocaleString()} km</div>\n          <div></div>\n          <div class="prox">${h.pts} pts</div>\n        </div>`).join("")}\n    </div>\n    <div class="footerrow">\n      <div></div>\n      <button class="btn primary" onclick="ggNewGame()">🔄 Nieuw spel</button>\n    </div>\n  ` }(), footer.appendChild(btn) }, window.ggNewGame = function () { renderGeoGuesser(app) };
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { COUNTRY_DATA } from "../data/countries.js";
+import { GEO_POINTS } from "../data/geoPoints.js";
+import { ALL_NAMES, haversineKm, flagEmoji, topbar } from "../core.js";
+
+const MAPILLARY_TOKEN = import.meta.env.VITE_MAPILLARY_TOKEN || "";
+
+let app,
+  gg = null;
+
+function weightedRandomPoint() {
+  const countries = ALL_NAMES.filter(
+    (n) => GEO_POINTS[n] && GEO_POINTS[n].length,
+  );
+  const country = countries[Math.floor(Math.random() * countries.length)];
+  const pts = GEO_POINTS[country];
+  const weighted = [];
+  pts.forEach((p, i) => {
+    const w = i === 0 ? 3 : 1;
+    for (let k = 0; k < w; k++) weighted.push(p);
+  });
+  return { country, ...weighted[Math.floor(Math.random() * weighted.length)] };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchMapillaryImage(lon, lat) {
+  const r = 0.045;
+  const jLon = lon + (Math.random() - 0.5) * r;
+  const jLat = lat + (Math.random() - 0.5) * r;
+  const bbox = [jLon - r, jLat - r, jLon + r, jLat + r].join(",");
+  const url = `https://graph.mapillary.com/images?access_token=${encodeURIComponent(MAPILLARY_TOKEN)}&fields=id,computed_geometry,thumb_2048_url,is_pano&bbox=${bbox}&limit=3`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const items = (data && data.data) || [];
+    if (items.length) {
+      const pick = items[Math.floor(Math.random() * items.length)];
+      const coords =
+        pick.computed_geometry && pick.computed_geometry.coordinates;
+      if (coords && pick.thumb_2048_url) {
+        return {
+          imageUrl: pick.thumb_2048_url,
+          lon: coords[0],
+          lat: coords[1],
+          isPano: !!pick.is_pano,
+        };
+      }
+    }
+  } catch (e) {
+    // ignore, try next attempt
+  }
+  return null;
+}
+
+export function renderGeoGuesser(rootEl) {
+  app = rootEl;
+  if (!MAPILLARY_TOKEN) {
+    app.innerHTML = `${topbar()}
+      <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Even instellen voordat je kunt spelen.</div></div></div>
+      <div class="card" style="cursor:default;">
+        <span class="icon">🔑</span>
+        <h3>Mapillary-token ontbreekt</h3>
+        <p style="margin-bottom:10px;">Dit spel gebruikt gratis straatfoto's van <a class="linklike" href="https://www.mapillary.com/developer" target="_blank" rel="noopener">Mapillary</a>. Maak daar gratis een account + app aan, kopieer de <em>Client Token</em> en zet die in <code>.env</code> (lokaal) of bij je Vercel project als omgevingsvariabele:</p>
+        <div class="small" style="background:var(--panel2); padding:10px 12px; border-radius:10px; font-family:monospace;">VITE_MAPILLARY_TOKEN=MLY|jouw-token</div>
+        <p class="small" style="margin-top:10px;">Na het instellen: lokaal opnieuw <code>npm run dev</code> starten, of op Vercel opnieuw deployen.</p>
+      </div>
+    `;
+    return;
+  }
+  if (gg && gg.map) {
+    gg.map.remove();
+    gg.map = null;
+  }
+  gg = {
+    round: 0,
+    totalScore: 0,
+    history: [],
+    current: null,
+    guess: null,
+    map: null,
+  };
+  drawLoading();
+  nextRound();
+}
+
+function drawLoading() {
+  if (gg.map) {
+    gg.map.remove();
+    gg.map = null;
+  }
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle">
+      <div><h2>📍 GeoGuesser</h2><div class="desc">Ronde ${gg.round + 1} van 5</div></div>
+      <div class="pillrow"><span class="pill">Score: <span class="n">${gg.totalScore}</span></span></div>
+    </div>
+    <div class="ggphoto-wrap loading">
+      <div class="ggspinner"></div>
+      <div class="small">Straatfoto zoeken...</div>
+    </div>
+  `;
+}
+
+async function findRound(attempts = 8) {
+  for (let i = 0; i < attempts; i++) {
+    const p = weightedRandomPoint();
+    const img = await fetchMapillaryImage(p.lon, p.lat);
+    if (img) return { ...img, countryHint: p.country };
+    await sleep(200);
+  }
+  return null;
+}
+
+async function nextRound() {
+  gg.round++;
+  gg.guess = null;
+  gg.submitted = false;
+  drawLoading();
+  const round = await findRound();
+  if (!round) {
+    app.innerHTML = `${topbar()}
+      <div class="gametitle"><div><h2>📍 GeoGuesser</h2></div></div>
+      <div class="card" style="cursor:default;">
+        <span class="icon">📡</span>
+        <h3>Geen straatfoto's gevonden</h3>
+        <p>Er kon geen Mapillary-dekking gevonden worden na meerdere pogingen. Probeer het nog eens.</p>
+        <button class="btn primary" onclick="ggNewGame()" style="margin-top:10px;">Opnieuw proberen</button>
+      </div>`;
+    return;
+  }
+  gg.current = round;
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle">
+      <div><h2>📍 GeoGuesser</h2><div class="desc">Waar op aarde is deze foto genomen?</div></div>
+      <div class="pillrow">
+        <span class="pill">Ronde <span class="n">${gg.round}</span>/5</span>
+        <span class="pill">Score: <span class="n">${gg.totalScore}</span></span>
+      </div>
+    </div>
+    <div class="ggphoto-wrap">
+      <img src="${gg.current.imageUrl}" alt="Straatfoto" />
+      ${gg.current.isPano ? '<span class="ggpano-badge">360° foto</span>' : ""}
+    </div>
+    <div class="small" style="margin:8px 0 4px;">Klik op de kaart om je gok te plaatsen.</div>
+    <div class="ggmap-wrap">
+      <div id="ggLeafletMap"></div>
+      <div class="gg-layer-toggle" id="ggLayerToggle">
+        <button data-layer="street" class="active">Kaart</button>
+        <button data-layer="satellite">Satelliet</button>
+      </div>
+    </div>
+    <div class="footerrow">
+      <div class="small" id="ggGuessInfo">${gg.guess ? "Gok geplaatst ✓" : "Nog geen gok geplaatst"}</div>
+      <button class="btn primary" id="ggSubmitBtn" ${gg.guess ? "" : "disabled"} onclick="ggSubmitGuess()">Bevestig gok</button>
+    </div>
+  `;
+  initMap();
+}
+
+function initMap() {
+  const container = document.getElementById("ggLeafletMap");
+  const map = L.map(container, {
+    center: [20, 10],
+    zoom: 2,
+    minZoom: 1,
+    worldCopyJump: true,
+  });
+  gg.map = map;
+
+  const streetLayer = L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+      attribution: "© OpenStreetMap",
+      maxZoom: 19,
+    },
+  );
+  const satelliteLayer = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Tiles © Esri", maxZoom: 19 },
+  );
+  streetLayer.addTo(map);
+  gg.activeLayer = streetLayer;
+  gg.streetLayer = streetLayer;
+  gg.satelliteLayer = satelliteLayer;
+
+  const toggle = document.getElementById("ggLayerToggle");
+  toggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-layer]");
+    if (!btn) return;
+    const kind = btn.dataset.layer;
+    [...toggle.querySelectorAll("button")].forEach((b) =>
+      b.classList.toggle("active", b === btn),
+    );
+    if (gg.activeLayer) map.removeLayer(gg.activeLayer);
+    gg.activeLayer = kind === "satellite" ? gg.satelliteLayer : gg.streetLayer;
+    gg.activeLayer.addTo(map);
+  });
+
+  gg.markersLayer = L.layerGroup().addTo(map);
+
+  map.on("click", (e) => {
+    if (gg.submitted) return;
+    gg.guess = [e.latlng.lng, e.latlng.lat];
+    renderMarkers();
+    document.getElementById("ggGuessInfo").textContent = "Gok geplaatst ✓";
+    document.getElementById("ggSubmitBtn").removeAttribute("disabled");
+  });
+
+  renderMarkers();
+  setTimeout(() => map.invalidateSize(), 50);
+}
+
+function renderMarkers() {
+  if (!gg.markersLayer) return;
+  gg.markersLayer.clearLayers();
+  if (gg.guess) {
+    L.circleMarker([gg.guess[1], gg.guess[0]], {
+      radius: 7,
+      color: "#fff",
+      weight: 1.5,
+      fillColor: "#7c5cff",
+      fillOpacity: 1,
+    }).addTo(gg.markersLayer);
+  }
+  if (gg.submitted) {
+    L.circleMarker([gg.current.lat, gg.current.lon], {
+      radius: 7,
+      color: "#fff",
+      weight: 1.5,
+      fillColor: "#2ecc71",
+      fillOpacity: 1,
+    }).addTo(gg.markersLayer);
+    if (gg.guess) {
+      L.polyline(
+        [
+          [gg.guess[1], gg.guess[0]],
+          [gg.current.lat, gg.current.lon],
+        ],
+        { color: "#fff", weight: 1.5, dashArray: "4 3", opacity: 0.85 },
+      ).addTo(gg.markersLayer);
+    }
+  }
+}
+
+window.ggSubmitGuess = function () {
+  if (!gg.guess) return;
+  gg.submitted = true;
+  const km = haversineKm(gg.guess, [gg.current.lon, gg.current.lat]);
+  const pts = scoreForDistance(km);
+  gg.totalScore += pts;
+  gg.history.push({ km, pts, country: gg.current.countryHint });
+  renderMarkers();
+  document.getElementById("ggSubmitBtn").outerHTML = "";
+  document.getElementById("ggGuessInfo").innerHTML =
+    `📏 ${Math.round(km).toLocaleString()} km van de juiste plek — <strong>${pts} punten</strong>`;
+  const footer = document.querySelector(".footerrow");
+  const btn = document.createElement("button");
+  btn.className = "btn primary";
+  btn.textContent = gg.round < 5 ? "Volgende ronde →" : "Bekijk eindscore";
+  btn.onclick = () => (gg.round < 5 ? nextRound() : showFinalScore());
+  footer.appendChild(btn);
+};
+
+function scoreForDistance(km) {
+  if (km < 20) return 5000;
+  return Math.max(0, Math.round(5000 * Math.exp(-km / 2000)));
+}
+
+function showFinalScore() {
+  if (gg.map) {
+    gg.map.remove();
+    gg.map = null;
+  }
+  const avg = Math.round(gg.totalScore / 5);
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Eindresultaat</div></div></div>
+    <div class="card" style="cursor:default; text-align:center;">
+      <span class="icon">🏁</span>
+      <h3>${gg.totalScore} / 25000 punten</h3>
+      <p>Gemiddeld ${avg} punten per ronde.</p>
+    </div>
+    <div class="guesslist" style="margin-top:14px;">
+      ${gg.history
+        .map(
+          (h, i) => `<div class="gitem">
+          <div class="name">Ronde ${i + 1} · ${h.country}</div>
+          <div class="dist">${Math.round(h.km).toLocaleString()} km</div>
+          <div></div>
+          <div class="prox">${h.pts} pts</div>
+        </div>`,
+        )
+        .join("")}
+    </div>
+    <div class="footerrow">
+      <div></div>
+      <button class="btn primary" onclick="ggNewGame()">🔄 Nieuw spel</button>
+    </div>
+  `;
+}
+
+window.ggNewGame = function () {
+  renderGeoGuesser(app);
+};
