@@ -821,6 +821,91 @@ code {
 .gg-select:focus {
   border-color: var(--accent);
 }
+
+/* ---------- Result overlay (solo: full-screen, mp: in-page) ---------- */
+.gg-result-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 400;
+  background: rgba(10, 11, 18, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.gg-result-header {
+  padding: 18px 20px 10px;
+  text-align: center;
+  color: #fff;
+}
+.gg-result-country {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.gg-result-stat {
+  font-size: 14px;
+  color: rgba(255,255,255,0.75);
+}
+.gg-result-map {
+  flex: 1;
+  min-height: 0;
+  background: #1a2234;
+}
+.gg-result-footer {
+  padding: 12px 20px 18px;
+  display: flex;
+  justify-content: center;
+}
+.gg-result-footer .btn {
+  min-width: 200px;
+  font-size: 15px;
+  padding: 12px 24px;
+}
+
+/* ---------- Map pin icon ---------- */
+.gg-map-pin {
+  font-size: 26px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+}
+.answer-pin {
+  font-size: 30px;
+}
+
+/* ---------- Player colour dot ---------- */
+.gg-player-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* ---------- Share link row ---------- */
+.gg-share-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.gg-share-input {
+  flex: 1;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--sub);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .small {
   font-size: 12px;
   color: var(--sub);
