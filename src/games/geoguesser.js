@@ -371,8 +371,10 @@ function showSoloResultOverlay(km, pts) {
     const rmap = L.map(mapEl, { zoomControl: true, worldCopyJump: true });
     gg.resultMap = rmap;
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap", maxZoom: 19,
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://carto.com">CARTO</a>',
+      maxZoom: 19,
+      subdomains: "abcd",
     }).addTo(rmap);
 
     const answerLatLng = [gg.current.lat, gg.current.lng];
@@ -580,8 +582,32 @@ async function enterLobby(code, name, isHost, settings) {
   room.on("gameover", onMpGameOver);
   room.on("settings", onMpSettingsReceived);
   room.on("restart", onMpRestart);
-  room.onPresence(() => {
+  room.onPresence((players) => {
     if (gg && gg.screen === "lobby") drawLobbyWaiting();
+
+    // Late-joiner catch-up: if game is in progress and a new player joined,
+    // host re-broadcasts the current round so they can jump in.
+    if (gg && gg.isHost && gg.screen === "round" && gg.current) {
+      const knownIds = new Set((gg.roundStartPlayers || []).map((p) => p.playerId));
+      const newPlayers = players.filter((p) => !knownIds.has(p.playerId));
+      if (newPlayers.length > 0) {
+        // Add them to the round; they can submit a guess
+        newPlayers.forEach((p) => {
+          gg.roundStartPlayers.push(p);
+          if (!gg.scoreboard[p.playerId])
+            gg.scoreboard[p.playerId] = { name: p.name, total: 0 };
+        });
+        // Re-send the current round payload — new players receive it, existing ones ignore it (idempotent)
+        gg.room.send("round", {
+          round: gg.round,
+          total: gg.rounds,
+          lat: gg.current.lat,
+          lng: gg.current.lng,
+          pano: gg.current.pano,
+          countryHint: gg.current.countryHint,
+        });
+      }
+    }
   });
 
   gg.screen = "lobby";
@@ -698,6 +724,13 @@ async function hostAdvanceRound() {
 }
 
 function onMpRoundStart(payload) {
+  // Idempotency guard: existing players in this round ignore re-broadcasts
+  // (host re-broadcasts to catch up late joiners). Late joiners have screen !== "round".
+  if (gg.screen === "round" && gg.round === payload.round) return;
+
+  // Clean up previous result map if any (e.g. late joiner who saw results)
+  if (gg.resultMap) { gg.resultMap.remove(); gg.resultMap = null; }
+
   gg.round = payload.round;
   gg.current = payload;
   gg.guess = null;
@@ -776,9 +809,11 @@ function onMpResults(payload) {
   gg.scoreboard = payload.scoreboard;
   gg.submitted = true;
 
+  // Always clean up maps before touching the DOM
+  if (gg.map) { gg.map.remove(); gg.map = null; }
+  if (gg.resultMap) { gg.resultMap.remove(); gg.resultMap = null; }
   const wrap = document.getElementById("ggFullscreenWrap");
   if (wrap) wrap.remove();
-  if (gg.map) { gg.map.remove(); gg.map = null; }
 
   drawMpResultsScreen(payload);
 }
@@ -839,8 +874,10 @@ function drawMpResultsScreen(payload) {
     const rmap = L.map(mapEl, { zoomControl: true, worldCopyJump: true });
     gg.resultMap = rmap;
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap", maxZoom: 19,
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://carto.com">CARTO</a>',
+      maxZoom: 19,
+      subdomains: "abcd",
     }).addTo(rmap);
 
     const answerLatLng = [payload.answer.lat, payload.answer.lng];
@@ -1026,8 +1063,21 @@ function initMap() {
 
   L.control.zoom({ position: "bottomleft" }).addTo(map);
 
-  const streetLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 19 });
-  const satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: "Tiles © Esri", maxZoom: 19 });
+  // CartoDB Dark Matter — English labels, dark theme, very detailed
+  const CARTO_DARK = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+  // CartoDB Voyager (light) for satellite toggle label layer
+  const ESRI_SAT   = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+  const ESRI_SAT_LABEL = "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
+
+  const streetLayer = L.tileLayer(CARTO_DARK, {
+    attribution: '&copy; <a href="https://carto.com">CARTO</a>',
+    maxZoom: 19,
+    subdomains: "abcd",
+  });
+  const satelliteBase = L.tileLayer(ESRI_SAT, { attribution: "Tiles © Esri", maxZoom: 19 });
+  const satelliteLabels = L.tileLayer(ESRI_SAT_LABEL, { maxZoom: 19, opacity: 0.85 });
+  const satelliteLayer = L.layerGroup([satelliteBase, satelliteLabels]);
+
   streetLayer.addTo(map);
   gg.activeLayer = streetLayer;
   gg.streetLayer = streetLayer;
