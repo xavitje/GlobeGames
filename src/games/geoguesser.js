@@ -235,6 +235,28 @@ function teardown() {
   clearRoundTimer();
   const wrap = document.getElementById("ggFullscreenWrap");
   if (wrap) wrap.remove();
+  document.getElementById("ggChatWidget")?.remove();
+  document.getElementById("ggConnBanner")?.remove();
+}
+
+// ---------- Reconnect: onthoud lobby-sessie zodat een page-reload 'm terugvindt ----------
+
+function saveLobbySession() {
+  if (!gg?.room) return;
+  try {
+    sessionStorage.setItem("gg_lobby_session", JSON.stringify({
+      code: gg.room.code, playerId: gg.playerId, name: gg.name, isHost: gg.isHost,
+    }));
+  } catch (e) {}
+}
+function clearLobbySession() {
+  try { sessionStorage.removeItem("gg_lobby_session"); } catch (e) {}
+}
+function getLobbySession() {
+  try {
+    const raw = sessionStorage.getItem("gg_lobby_session");
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
 }
 
 // ---------- URL helpers ----------
@@ -276,8 +298,39 @@ export function renderGeoGuesser(rootEl) {
 
   const urlLobby = getLobbyFromUrl();
   if (urlLobby && hasMultiplayerConfig()) { drawAutoJoinScreen(urlLobby); return; }
+  const savedLobby = hasMultiplayerConfig() ? getLobbySession() : null;
+  if (savedLobby) { drawReconnectPrompt(savedLobby); return; }
   drawStartScreen();
 }
+
+function drawReconnectPrompt(saved) {
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>👥 Opnieuw verbinden?</h2><div class="desc">Je zat nog in een lobby.</div></div></div>
+    <div class="card" style="cursor:default; text-align:center;">
+      <span class="icon">🔌</span>
+      <h3>Opnieuw verbinden met lobby ${saved.code}?</h3>
+      <p>Je was verbonden als <strong>${saved.name}</strong>.</p>
+    </div>
+    <div class="footerrow">
+      <button class="btn" onclick="ggDismissReconnect()">Nee, terug naar menu</button>
+      <button class="btn primary" onclick="ggReconnectLobby()">Ja, opnieuw verbinden →</button>
+    </div>`;
+  window.__ggPendingReconnect = saved;
+}
+
+window.ggDismissReconnect = function () {
+  clearLobbySession();
+  window.__ggPendingReconnect = null;
+  drawStartScreen();
+};
+
+window.ggReconnectLobby = async function () {
+  const saved = window.__ggPendingReconnect;
+  window.__ggPendingReconnect = null;
+  if (!saved) { drawStartScreen(); return; }
+  await enterLobby(saved.code, saved.name, saved.isHost, null, saved.playerId);
+};
 
 function drawAutoJoinScreen(code) {
   app.innerHTML = `
@@ -894,12 +947,12 @@ window.ggJoinLobby = async function (codeArg) {
   await enterLobby(code, getPlayerName(), false, null);
 };
 
-async function enterLobby(code, name, isHost, settings) {
+async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   app.innerHTML = `${topbar()}
     <div class="gametitle"><div><h2>👥 Lobby ${code.toUpperCase()}</h2><div class="desc">Verbinden...</div></div></div>
     <div class="ggphoto-wrap loading"><div class="ggspinner"></div></div>`;
 
-  const playerId = randomPlayerId();
+  const playerId = existingPlayerId || randomPlayerId();
   const room = new GameRoom(code, playerId, name);
 
   gg = { mode: "mp", room, isHost, playerId, name, round: 0,
@@ -930,6 +983,20 @@ async function enterLobby(code, name, isHost, settings) {
   room.on("settings", onMpSettingsReceived);
   room.on("restart", onMpRestart);
   room.on("teams", onMpTeamsReceived);
+  room.on("chat", onMpChatReceived);
+  room.on("resync", onMpResyncRequest);
+
+  room.onConnectionChange((status) => {
+    if (status === "disconnected") {
+      showConnBanner("⚠️ Verbinding verbroken — opnieuw verbinden...");
+    } else if (status === "reconnected") {
+      hideConnBanner();
+      // Vraag de host om de huidige rondestatus opnieuw te sturen, zodat we
+      // niets gemist hebben tijdens de onderbreking (hergebruikt de
+      // bestaande "late-joiner catch-up"-aanpak).
+      if (!gg.isHost) gg.room.send("resync", {});
+    }
+  });
 
   room.onPresence((players) => {
     // Auto-assign new players to the smaller team in Team Duels lobbies.
@@ -962,6 +1029,8 @@ async function enterLobby(code, name, isHost, settings) {
 
   gg.screen = "lobby";
   setLobbyInUrl(code);
+  saveLobbySession();
+  ensureChatWidget();
   drawLobbyWaiting();
 }
 
@@ -1033,15 +1102,142 @@ window.ggCopyLink = function () {
   if (btn) { btn.textContent = "✓ Gekopieerd!"; setTimeout(() => btn.textContent = "📋 Kopieer", 2000); }
 };
 
-window.ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); drawStartScreen(); };
+window.ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); clearLobbySession(); drawStartScreen(); };
 
 window.ggBackToHostSettings = function () {
   if (!gg?.isHost) return;
   const prefill = { name: gg.name, rounds: gg.rounds, locationSet: gg.locationSet, gameMode: gg.gameMode, roundTime: gg.roundTime };
   teardown();
   clearLobbyFromUrl();
+  clearLobbySession();
   ggShowMpHostSettings(prefill);
 };
+
+// ---------- Chat (blijft bestaan over alle scherm-wissels in de lobby heen) ----------
+
+function ensureChatWidget() {
+  if (!gg?.room || document.getElementById("ggChatWidget")) return;
+  const widget = document.createElement("div");
+  widget.id = "ggChatWidget";
+  widget.className = "gg-chat-widget";
+  widget.innerHTML = `
+    <button class="gg-chat-toggle" id="ggChatToggle" title="Chat">💬</button>
+    <div class="gg-chat-panel" id="ggChatPanel">
+      <div class="gg-chat-header">
+        <span>💬 Chat</span>
+        <button class="gg-chat-close" id="ggChatClose">✕</button>
+      </div>
+      <div class="gg-chat-messages" id="ggChatMessages"></div>
+      <form class="gg-chat-form" id="ggChatForm">
+        <input id="ggChatInput" type="text" maxlength="200" autocomplete="off" placeholder="Typ een bericht..." />
+        <button type="submit" class="gg-chat-send">➤</button>
+      </form>
+    </div>`;
+  document.body.appendChild(widget);
+
+  document.getElementById("ggChatToggle").onclick = () => toggleChatPanel(true);
+  document.getElementById("ggChatClose").onclick = () => toggleChatPanel(false);
+  document.getElementById("ggChatForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = document.getElementById("ggChatInput");
+    const text = (input.value || "").trim();
+    if (!text || !gg?.room) return;
+    input.value = "";
+    appendChatMessage(gg.name, text, true);
+    gg.room.send("chat", { name: gg.name, text });
+  });
+}
+
+function toggleChatPanel(open) {
+  const panel = document.getElementById("ggChatPanel");
+  const widget = document.getElementById("ggChatWidget");
+  if (!panel || !widget) return;
+  widget.classList.toggle("open", open);
+  if (open) {
+    gg.chatUnread = 0;
+    updateChatBadge();
+    document.getElementById("ggChatInput")?.focus();
+  }
+}
+
+function appendChatMessage(name, text, isMe) {
+  const list = document.getElementById("ggChatMessages");
+  if (list) {
+    const row = document.createElement("div");
+    row.className = "gg-chat-msg" + (isMe ? " me" : "");
+    const nameEl = document.createElement("span");
+    nameEl.className = "gg-chat-name";
+    nameEl.textContent = name;
+    const textEl = document.createElement("span");
+    textEl.className = "gg-chat-text";
+    textEl.textContent = text;
+    row.appendChild(nameEl);
+    row.appendChild(textEl);
+    list.appendChild(row);
+    list.scrollTop = list.scrollHeight;
+  }
+  const isOpen = document.getElementById("ggChatWidget")?.classList.contains("open");
+  if (!isMe && !isOpen) {
+    gg.chatUnread = (gg.chatUnread || 0) + 1;
+    updateChatBadge();
+  }
+}
+
+function updateChatBadge() {
+  const toggle = document.getElementById("ggChatToggle");
+  if (!toggle) return;
+  let badge = document.getElementById("ggChatBadge");
+  if (gg.chatUnread > 0) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.id = "ggChatBadge";
+      badge.className = "gg-chat-badge";
+      toggle.appendChild(badge);
+    }
+    badge.textContent = gg.chatUnread > 9 ? "9+" : String(gg.chatUnread);
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+function onMpChatReceived(payload) {
+  if (payload.from === gg.playerId) return; // eigen bericht is al lokaal getoond
+  appendChatMessage(payload.name, payload.text, false);
+}
+
+// ---------- Reconnect: verbindingsbanner + host stuurt huidige stand opnieuw ----------
+
+function showConnBanner(text) {
+  let banner = document.getElementById("ggConnBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "ggConnBanner";
+    banner.className = "gg-conn-banner";
+    document.body.appendChild(banner);
+  }
+  banner.textContent = text;
+}
+
+function hideConnBanner() {
+  document.getElementById("ggConnBanner")?.remove();
+}
+
+// Host-only: een herverbonden speler kan gemist hebben wat er gebeurde —
+// stuur de huidige rondestatus (of resultaten/eindstand) opnieuw, net als
+// bij een laatkomer die de lobby binnenkomt.
+function onMpResyncRequest() {
+  if (!gg?.isHost) return;
+  if (gg.screen === "round" && gg.current) {
+    gg.room.send("round", { round: gg.round, total: gg.rounds, lat: gg.current.lat, lng: gg.current.lng, pano: gg.current.pano, countryHint: gg.current.countryHint });
+  } else if (gg.screen === "results" && gg.lastResultsPayload) {
+    gg.room.send("results", gg.lastResultsPayload);
+  } else if (gg.screen === "gameover" && gg.lastGameOverPayload) {
+    gg.room.send("gameover", gg.lastGameOverPayload);
+  } else if (gg.screen === "lobby") {
+    gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode });
+    gg.room.send("teams", { teams: gg.teams });
+  }
+}
 
 window.ggMpStartGame = function () {
   if (!gg.isHost) return;
@@ -1208,6 +1404,8 @@ function hostFinishRound() {
 function onMpResults(payload) {
   if (payload.round !== gg.round) return;
   clearRoundTimer();
+  gg.screen = "results";
+  gg.lastResultsPayload = payload;
   gg.scoreboard = payload.scoreboard;
   if (payload.hp) gg.hp = payload.hp;
   if (payload.teamScore) gg.teamScore = payload.teamScore;
@@ -1351,6 +1549,8 @@ window.ggMpNextFromHost = function () {
 // ---------- Post-game: restart in same lobby ----------
 
 function onMpGameOver(payload) {
+  gg.screen = "gameover";
+  gg.lastGameOverPayload = payload;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   gg.scoreboard = payload.scoreboard;
   if (payload.hp) gg.hp = payload.hp;

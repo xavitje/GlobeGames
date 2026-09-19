@@ -40,6 +40,10 @@ export class GameRoom {
     this.channel = null;
     this.listeners = {};
     this.presenceListeners = [];
+    this.connectionListeners = [];
+    this.reconnectAttempts = 0;
+    this.reconnectTimer = null;
+    this.intentionalLeave = false;
   }
 
   on(type, handler) {
@@ -49,6 +53,13 @@ export class GameRoom {
 
   onPresence(handler) {
     this.presenceListeners.push(handler);
+    return this;
+  }
+
+  // handler(status) where status is "disconnected" or "reconnected" —
+  // fired only after the *initial* connect() has already resolved.
+  onConnectionChange(handler) {
+    this.connectionListeners.push(handler);
     return this;
   }
 
@@ -66,6 +77,10 @@ export class GameRoom {
   }
 
   connect() {
+    return this._subscribe(true);
+  }
+
+  _subscribe(isInitial) {
     const supabase = getClient();
     const channel = supabase.channel(ROOM_PREFIX + this.code, {
       config: { presence: { key: this.playerId }, broadcast: { self: true } },
@@ -85,12 +100,36 @@ export class GameRoom {
       channel.subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           await channel.track({ playerId: this.playerId, name: this.name });
-          resolve(this);
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          reject(new Error("Kon geen verbinding maken met de lobby"));
+          this.reconnectAttempts = 0;
+          if (isInitial) {
+            resolve(this);
+          } else {
+            this.connectionListeners.forEach((fn) => fn("reconnected"));
+          }
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          if (isInitial) {
+            reject(new Error("Kon geen verbinding maken met de lobby"));
+          } else if (!this.intentionalLeave) {
+            this.connectionListeners.forEach((fn) => fn("disconnected"));
+            this._scheduleReconnect();
+          }
         }
       });
     });
+  }
+
+  // Automatic reconnect-after-disconnect with backoff, re-using the same
+  // playerId so presence/late-joiner logic recognizes this as the same player.
+  _scheduleReconnect() {
+    if (this.intentionalLeave || this.reconnectTimer) return;
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * 2 ** (this.reconnectAttempts - 1), 10000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.intentionalLeave) return;
+      if (this.channel) { getClient().removeChannel(this.channel); this.channel = null; }
+      this._subscribe(false).catch(() => { this._scheduleReconnect(); });
+    }, delay);
   }
 
   send(type, data) {
@@ -103,6 +142,8 @@ export class GameRoom {
   }
 
   leave() {
+    this.intentionalLeave = true;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.channel) {
       getClient().removeChannel(this.channel);
       this.channel = null;

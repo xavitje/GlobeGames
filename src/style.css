@@ -1077,3 +1077,142 @@ a.linklike {
   outline: none;
   border-color: var(--accent, #7c5cff);
 }
+
+/* ---------- Multiplayer: chat-widget (blijft over scherm-wissels heen) ---------- */
+.gg-chat-widget {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.gg-chat-toggle {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(15,16,22,0.9);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  order: 2;
+}
+.gg-chat-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ff5c7c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.gg-chat-panel {
+  order: 1;
+  display: none;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100vw - 40px);
+  height: 360px;
+  max-height: 60vh;
+  background: rgba(15,16,22,0.94);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+}
+.gg-chat-widget.open .gg-chat-panel {
+  display: flex;
+}
+.gg-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  color: #fff;
+}
+.gg-chat-close {
+  background: none;
+  border: none;
+  color: #fff;
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 14px;
+}
+.gg-chat-close:hover { opacity: 1; }
+.gg-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gg-chat-msg {
+  font-size: 13px;
+  color: #fff;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.gg-chat-msg .gg-chat-name {
+  font-weight: 700;
+  margin-right: 6px;
+  opacity: 0.85;
+}
+.gg-chat-msg.me .gg-chat-name {
+  color: #7c5cff;
+}
+.gg-chat-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+.gg-chat-form input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: inherit;
+  font-size: 13px;
+}
+.gg-chat-send {
+  background: #7c5cff;
+  border: none;
+  color: #fff;
+  width: 34px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* ---------- Multiplayer: verbinding-verbroken banner ---------- */
+.gg-conn-banner {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  background: rgba(255, 92, 124, 0.95);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 18px;
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
