@@ -786,10 +786,9 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
       <span class="gg-hud-pill">${roundLabel}</span>
       <span class="gg-hud-pill gg-hud-score" id="ggHudScore">${scoreLabel}</span>
     </div>
-    <div class="gg-map-corner" id="ggMapCorner">
+    <div class="gg-map-corner" id="ggMapCorner" tabindex="0">
       <div class="gg-map-corner-header">
         <span id="ggGuessInfo" class="gg-map-guess-info">Klik op de kaart om te gokken</span>
-        <button class="gg-map-expand-btn" id="ggExpandBtn" title="Vergroot kaart">⤢</button>
       </div>
       <div class="gg-map-inner">
         <div id="ggGuessMap" class="gg-guess-map"></div>
@@ -807,11 +806,20 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   gg.onSubmitHandler = onSubmit;
   document.getElementById("ggSubmitBtn").onclick = () => gg.onSubmitHandler();
 
-  document.getElementById("ggExpandBtn").addEventListener("click", () => {
-    const corner = document.getElementById("ggMapCorner");
-    corner.classList.toggle("expanded");
-    document.getElementById("ggExpandBtn").textContent = corner.classList.contains("expanded") ? "⤡" : "⤢";
-  });
+  // Map corner grows on hover (like OpenGuessr) instead of a toggle button.
+  // Google Maps needs an explicit resize nudge once the CSS transition
+  // finishes, otherwise the tiles stay cropped to the old size.
+  const mapCorner = document.getElementById("ggMapCorner");
+  const nudgeMapResize = () => {
+    if (!gg.map) return;
+    const center = gg.map.getCenter();
+    window.google.maps.event.trigger(gg.map, "resize");
+    if (center) gg.map.setCenter(center);
+  };
+  mapCorner.addEventListener("mouseenter", () => setTimeout(nudgeMapResize, 310));
+  mapCorner.addEventListener("mouseleave", () => setTimeout(nudgeMapResize, 310));
+  mapCorner.addEventListener("focus", () => setTimeout(nudgeMapResize, 310));
+  mapCorner.addEventListener("blur", () => setTimeout(nudgeMapResize, 310));
 }
 
 async function initPanorama(round) {

@@ -30,7 +30,10 @@ function sleep(ms) {
 }
 
 // Looks for a real Street View panorama near (lat, lng), trying growing radii.
-export async function findNearbyPanorama(maps, lat, lng) {
+// Rejects panoramas with no navigable links: those are dead-end/enclosed spots
+// (courtyards, building interiors Google mislabels as outdoor, private
+// driveways, etc.) where the player can't move and has no clues at all.
+export async function findNearbyPanorama(maps, lat, lng, { minLinks = 1 } = {}) {
   const sv = new maps.StreetViewService();
   const radii = [5000, 20000, 50000];
   for (const radius of radii) {
@@ -42,7 +45,12 @@ export async function findNearbyPanorama(maps, lat, lng) {
           source: maps.StreetViewSource.OUTDOOR,
         },
         (data, status) => {
-          if (status === maps.StreetViewStatus.OK && data && data.location) {
+          if (
+            status === maps.StreetViewStatus.OK &&
+            data &&
+            data.location &&
+            (data.links ? data.links.length : 0) >= minLinks
+          ) {
             resolve({
               lat: data.location.latLng.lat(),
               lng: data.location.latLng.lng(),
@@ -90,5 +98,9 @@ export function createPanorama(maps, el, { lat, lng, pano }) {
     panControl: true,
     zoomControl: true,
     clickToGo: true,
+    // Google normally auto zooms in at intersections when walking, which
+    // pulls in extra high-res tiles and is a big part of the "laggy" feel.
+    // Keeping the zoom fixed makes movement noticeably snappier.
+    enableCloseUp: false,
   });
 }

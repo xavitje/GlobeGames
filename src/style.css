@@ -654,11 +654,14 @@ code {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: width 0.25s cubic-bezier(0.4,0,0.2,1),
-              height 0.25s cubic-bezier(0.4,0,0.2,1);
+  transition: width 0.3s cubic-bezier(0.4,0,0.2,1),
+              height 0.3s cubic-bezier(0.4,0,0.2,1),
+              box-shadow 0.3s ease;
 }
-.gg-map-corner.expanded {
-  width: 460px;
+.gg-map-corner:hover,
+.gg-map-corner:focus-within {
+  width: 640px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.7);
 }
 
 .gg-map-corner-header {
@@ -677,24 +680,6 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.gg-map-expand-btn {
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.15);
-  color: #fff;
-  font-size: 14px;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-  flex-shrink: 0;
-}
-.gg-map-expand-btn:hover {
-  background: rgba(255,255,255,0.2);
-}
 
 .gg-map-inner {
   position: relative;
@@ -705,9 +690,11 @@ code {
   height: 210px;
   cursor: crosshair;
   background: #1a2234;
+  transition: height 0.3s cubic-bezier(0.4,0,0.2,1);
 }
-.gg-map-corner.expanded .gg-guess-map {
-  height: 300px;
+.gg-map-corner:hover .gg-guess-map,
+.gg-map-corner:focus-within .gg-guess-map {
+  height: 440px;
 }
 
 /* Layer toggle positioned inside map corner */
