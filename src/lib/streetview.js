@@ -17,7 +17,10 @@ export function loadGoogleMaps() {
       resolve(window.google.maps);
     };
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_KEY)}&v=weekly&callback=${cbName}`;
+    // loading=async is Google's recommended loading pattern; without it the
+    // API can block/serialize its own startup work, which is likely what
+    // caused the slow "black world" first-load.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_KEY)}&v=weekly&loading=async&callback=${cbName}`;
     script.async = true;
     script.onerror = () => reject(new Error("Kon Google Maps niet laden"));
     document.head.appendChild(script);

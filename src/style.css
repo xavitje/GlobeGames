@@ -660,7 +660,7 @@ code {
 }
 .gg-map-corner:hover,
 .gg-map-corner:focus-within {
-  width: 640px;
+  width: min(960px, 92vw);
   box-shadow: 0 12px 48px rgba(0,0,0,0.7);
 }
 
@@ -694,7 +694,7 @@ code {
 }
 .gg-map-corner:hover .gg-guess-map,
 .gg-map-corner:focus-within .gg-guess-map {
-  height: 440px;
+  height: min(660px, 66vh);
 }
 
 /* Layer toggle positioned inside map corner */
