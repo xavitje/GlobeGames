@@ -43,8 +43,25 @@ const DARK_MAP_STYLE = [
 
 // ---------- Location set helpers ----------
 
-function buildPointFn(setKey = "world", rng = Math.random) {
-  const set = LOCATION_SETS[setKey] || LOCATION_SETS["world"];
+// All landen waar we punten voor hebben, gesorteerd — voor de "specifiek
+// land"-kiezer (solo én multiplayer).
+const ALL_GEO_COUNTRIES = Object.keys(GEO_POINTS).sort((a, b) => a.localeCompare(b, "nl"));
+
+// `loc` is ofwel een bestaande preset-key ("world", "europe", ...) ofwel
+// een object { type: "country", name } voor een door de speler gekozen land.
+function resolveLocationSet(loc) {
+  if (loc && typeof loc === "object" && loc.type === "country" && GEO_POINTS[loc.name]) {
+    return { label: `🚩 ${loc.name}`, countries: [loc.name], onlyCapital: false };
+  }
+  return LOCATION_SETS[loc] || LOCATION_SETS["world"];
+}
+
+function locationSetLabel(loc) {
+  return resolveLocationSet(loc).label;
+}
+
+function buildPointFn(loc = "world", rng = Math.random) {
+  const set = resolveLocationSet(loc);
   const eligible = set.countries.filter((c) => GEO_POINTS[c]?.length);
   return function randomPoint() {
     const country = eligible[Math.floor(rng() * eligible.length)];
@@ -54,6 +71,46 @@ function buildPointFn(setKey = "world", rng = Math.random) {
     pts.forEach((p, i) => { const w = i === 0 ? 2 : 1; for (let k = 0; k < w; k++) weighted.push(p); });
     return { country, ...weighted[Math.floor(rng() * weighted.length)] };
   };
+}
+
+// Herbruikbare "Locaties"-instelling: de bestaande presets plus een
+// "Specifiek land"-optie met een tweede dropdown van alle beschikbare landen.
+function locationSettingHtml(idPrefix, current) {
+  const isCountry = current && typeof current === "object" && current.type === "country";
+  const selectedKey = isCountry ? "country" : (current || "world");
+  const presetOptions = Object.entries(LOCATION_SETS)
+    .map(([key, s]) => `<option value="${key}" ${key === selectedKey ? "selected" : ""}>${s.label}</option>`)
+    .join("");
+  const countryOptions = ALL_GEO_COUNTRIES
+    .map((name) => `<option value="${name}" ${isCountry && current.name === name ? "selected" : ""}>${name}</option>`)
+    .join("");
+  return `
+    <div class="gg-select-wrap"><select id="${idPrefix}LocationSet" class="gg-select">
+      ${presetOptions}
+      <option value="country" ${selectedKey === "country" ? "selected" : ""}>🚩 Specifiek land</option>
+    </select></div>
+    <div class="gg-select-wrap" id="${idPrefix}CountryWrap" style="margin-top:8px; ${selectedKey === "country" ? "" : "display:none;"}">
+      <select id="${idPrefix}CountrySelect" class="gg-select">${countryOptions}</select>
+    </div>`;
+}
+
+function wireLocationSetting(idPrefix) {
+  const sel = document.getElementById(`${idPrefix}LocationSet`);
+  const wrap = document.getElementById(`${idPrefix}CountryWrap`);
+  if (!sel || !wrap) return;
+  sel.addEventListener("change", () => {
+    wrap.style.display = sel.value === "country" ? "" : "none";
+  });
+}
+
+function readLocationSetting(idPrefix) {
+  const sel = document.getElementById(`${idPrefix}LocationSet`);
+  const val = sel?.value || "world";
+  if (val === "country") {
+    const name = document.getElementById(`${idPrefix}CountrySelect`)?.value;
+    return name ? { type: "country", name } : "world";
+  }
+  return val;
 }
 
 // ---------- Seeded RNG (for the daily challenge) ----------
@@ -383,9 +440,6 @@ function drawStartScreen() {
 // ---------- Solo settings ----------
 
 window.ggShowSoloSettings = function (prefill = {}) {
-  const setOptions = Object.entries(LOCATION_SETS)
-    .map(([key, s]) => `<option value="${key}" ${key === (prefill.locationSet || "world") ? "selected" : ""}>${s.label}</option>`)
-    .join("");
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
@@ -397,7 +451,7 @@ window.ggShowSoloSettings = function (prefill = {}) {
         ${[3,5,7,10].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n}</button>`).join("")}
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
-      <div class="gg-select-wrap"><select id="soloLocationSet" class="gg-select">${setOptions}</select></div>
+      ${locationSettingHtml("solo", prefill.locationSet)}
       <label class="gg-label" style="margin-top:16px;">Moeilijkheidsgraad</label>
       <div class="gg-pill-row" id="soloDifficultyPills">
         <button class="gg-pill-btn${(prefill.difficulty || "free") === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
@@ -422,6 +476,7 @@ window.ggShowSoloSettings = function (prefill = {}) {
     document.querySelectorAll("#soloDifficultyPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
   });
+  wireLocationSetting("solo");
 };
 
 window.ggShowStart = function () { drawStartScreen(); };
@@ -429,7 +484,7 @@ window.ggShowStart = function () { drawStartScreen(); };
 window.ggStartSolo = function () {
   const roundBtn = document.querySelector("#soloRoundPills .gg-pill-btn.active");
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5;
-  const locSet = document.getElementById("soloLocationSet")?.value || "world";
+  const locSet = readLocationSetting("solo");
   const diffBtn = document.querySelector("#soloDifficultyPills .gg-pill-btn.active");
   const difficulty = diffBtn ? diffBtn.dataset.v : "free";
   const blackwhite = !!document.getElementById("soloBlackWhite")?.checked;
@@ -599,6 +654,7 @@ function showSoloResultOverlay(km, pts) {
 function showSoloFinalScore() {
   const avg = Math.round(gg.totalScore / gg.rounds);
   const savedLoc = gg.locationSet, savedRounds = gg.rounds;
+  window.__ggSoloReplayPrefill = { rounds: savedRounds, locationSet: savedLoc };
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Eindresultaat</div></div></div>
@@ -616,9 +672,13 @@ function showSoloFinalScore() {
     </div>
     <div class="footerrow">
       <button class="btn" onclick="ggShowStart()">← Menu</button>
-      <button class="btn primary" onclick="ggShowSoloSettings(${JSON.stringify({ rounds: savedRounds, locationSet: savedLoc })})">🔄 Opnieuw spelen</button>
+      <button class="btn primary" onclick="ggReplaySoloSettings()">🔄 Opnieuw spelen</button>
     </div>`;
 }
+
+window.ggReplaySoloSettings = function () {
+  ggShowSoloSettings(window.__ggSoloReplayPrefill || {});
+};
 
 window.ggExitToStart = function () { teardown(); drawStartScreen(); };
 
@@ -800,8 +860,6 @@ window.ggShowMultiplayerMenu = function () {
 };
 
 window.ggShowMpHostSettings = function (prefill = {}) {
-  const setOptions = Object.entries(LOCATION_SETS)
-    .map(([key, s]) => `<option value="${key}" ${key === (prefill.locationSet || "world") ? "selected" : ""}>${s.label}</option>`).join("");
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
@@ -820,7 +878,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
         ${[3,5,7,10].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n}</button>`).join("")}
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
-      <div class="gg-select-wrap"><select id="mpLocationSet" class="gg-select">${setOptions}</select></div>
+      ${locationSettingHtml("mp", prefill.locationSet)}
       ${timerSettingHtml("mp", prefill.roundTime || null)}
     </div>
     <div class="footerrow">
@@ -832,6 +890,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
     document.querySelectorAll("#mpRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
   });
+  wireLocationSetting("mp");
   wireTimerSetting("mp");
 };
 
@@ -894,7 +953,7 @@ function getMpSettings() {
   const roundBtn = document.querySelector("#mpRoundPills .gg-pill-btn.active");
   return {
     rounds: roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5,
-    locationSet: document.getElementById("mpLocationSet")?.value || "world",
+    locationSet: readLocationSetting("mp"),
     roundTime: readTimerSetting("mp"),
     gameMode: document.getElementById("mpGameMode")?.value || "ffa",
   };
@@ -1065,7 +1124,7 @@ function onMpSettingsReceived(payload) {
 
 function drawLobbyWaiting() {
   const players = gg.room.players();
-  const setLabel = LOCATION_SETS[gg.locationSet]?.label || gg.locationSet;
+  const setLabel = locationSetLabel(gg.locationSet);
   const modeLabel = (GAME_MODES[gg.gameMode] || GAME_MODES.ffa).label;
   const shareUrl = `${location.origin}${location.pathname}#geoguesser?lobby=${gg.room.code}`;
   const isTeamDuels = gg.gameMode === "teamduels";
@@ -1582,8 +1641,6 @@ function onMpGameOver(payload) {
   if (payload.alive) gg.alive = new Set(payload.alive);
   if (payload.eliminated) gg.eliminated = payload.eliminated;
   const sorted = Object.values(payload.scoreboard).sort((a, b) => b.total - a.total);
-  const setOptions = Object.entries(LOCATION_SETS)
-    .map(([key, s]) => `<option value="${key}" ${key === gg.locationSet ? "selected" : ""}>${s.label}</option>`).join("");
 
   let winnerText = sorted[0] ? sorted[0].name + " wint!" : "Klaar!";
   let extraWinnerHtml = "";
@@ -1626,7 +1683,7 @@ function onMpGameOver(payload) {
         ${[3,5,7,10].map(n => `<button class="gg-pill-btn${n===gg.rounds?" active":""}" data-v="${n}">${n}</button>`).join("")}
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
-      <div class="gg-select-wrap"><select id="restartLocationSet" class="gg-select">${setOptions}</select></div>
+      ${locationSettingHtml("restart", gg.locationSet)}
       ${timerSettingHtml("restart", gg.roundTime)}
     </div>` : `<div class="card" style="cursor:default; margin-top:14px; text-align:center;">
       <div class="small">Wachten tot de host een nieuw spel start...</div>
@@ -1642,6 +1699,7 @@ function onMpGameOver(payload) {
       document.querySelectorAll("#restartRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
     });
+    wireLocationSetting("restart");
     wireTimerSetting("restart");
   }
 }
@@ -1650,7 +1708,7 @@ window.ggMpRestartGame = function () {
   if (!gg.isHost) return;
   const roundBtn = document.querySelector("#restartRoundPills .gg-pill-btn.active");
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : gg.rounds;
-  const locSet = document.getElementById("restartLocationSet")?.value || gg.locationSet;
+  const locSet = readLocationSetting("restart");
   const roundTime = readTimerSetting("restart");
   gg.rounds = rounds; gg.locationSet = locSet; gg.roundTime = roundTime; gg.pointFn = buildPointFn(locSet);
   gg.room.send("restart", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode });
@@ -1727,6 +1785,7 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   document.getElementById("ggMapExpandBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
     mapCorner.classList.toggle("gg-expanded");
+    e.currentTarget.blur();
     setTimeout(nudgeMapResize, 310);
   });
 }

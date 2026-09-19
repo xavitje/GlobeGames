@@ -734,7 +734,6 @@ code {
               box-shadow 0.3s ease;
 }
 .gg-map-corner:hover,
-.gg-map-corner:focus-within,
 .gg-map-corner.gg-expanded {
   width: min(960px, 92vw);
   box-shadow: 0 12px 48px rgba(0,0,0,0.7);
@@ -786,7 +785,6 @@ code {
   transition: height 0.3s cubic-bezier(0.4,0,0.2,1);
 }
 .gg-map-corner:hover .gg-guess-map,
-.gg-map-corner:focus-within .gg-guess-map,
 .gg-map-corner.gg-expanded .gg-guess-map {
   height: min(660px, 66vh);
 }
@@ -1271,15 +1269,13 @@ a.linklike {
     right: 12px;
     bottom: 12px;
   }
-  .gg-map-corner.gg-expanded,
-  .gg-map-corner:focus-within {
+  .gg-map-corner.gg-expanded {
     width: calc(100vw - 24px);
   }
   .gg-guess-map {
     height: 150px;
   }
-  .gg-map-corner.gg-expanded .gg-guess-map,
-  .gg-map-corner:focus-within .gg-guess-map {
+  .gg-map-corner.gg-expanded .gg-guess-map {
     height: min(70vh, 520px);
   }
   .gg-map-corner-header {
