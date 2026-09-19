@@ -1,5 +1,5 @@
 import { GEO_POINTS, LOCATION_SETS } from "../data/geoPoints.js";
-import { ALL_NAMES, haversineKm, topbar } from "../core.js";
+import { ALL_NAMES, haversineKm, topbar, attachAutocomplete, candidateNames, findCountryByLoose } from "../core.js";
 import {
   hasGoogleMapsKey,
   loadGoogleMaps,
@@ -43,17 +43,73 @@ const DARK_MAP_STYLE = [
 
 // ---------- Location set helpers ----------
 
-function buildPointFn(setKey = "world") {
+function buildPointFn(setKey = "world", rng = Math.random) {
   const set = LOCATION_SETS[setKey] || LOCATION_SETS["world"];
   const eligible = set.countries.filter((c) => GEO_POINTS[c]?.length);
   return function randomPoint() {
-    const country = eligible[Math.floor(Math.random() * eligible.length)];
+    const country = eligible[Math.floor(rng() * eligible.length)];
     const pts = GEO_POINTS[country];
     if (set.onlyCapital) return { country, ...pts[0] };
     const weighted = [];
     pts.forEach((p, i) => { const w = i === 0 ? 2 : 1; for (let k = 0; k < w; k++) weighted.push(p); });
-    return { country, ...weighted[Math.floor(Math.random() * weighted.length)] };
+    return { country, ...weighted[Math.floor(rng() * weighted.length)] };
   };
+}
+
+// ---------- Seeded RNG (for the daily challenge) ----------
+
+function hashStringToSeed(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------- Streak: best-score persistence ----------
+
+function getStreakBest() {
+  try { return parseInt(localStorage.getItem("gg_streak_best") || "0", 10) || 0; }
+  catch (e) { return 0; }
+}
+function setStreakBest(n) {
+  try { localStorage.setItem("gg_streak_best", String(n)); } catch (e) {}
+}
+
+// ---------- Daily challenge: seed, persistence, share text ----------
+
+function getDailyKey() {
+  const d = new Date();
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function getDailyResult() {
+  try {
+    const raw = localStorage.getItem("gg_daily_" + getDailyKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function saveDailyResult(result) {
+  try { localStorage.setItem("gg_daily_" + getDailyKey(), JSON.stringify(result)); } catch (e) {}
+}
+function dailyDayNumber() {
+  const epoch = Date.UTC(2026, 0, 1);
+  return Math.max(1, Math.floor((Date.now() - epoch) / 86400000) + 1);
+}
+function buildDailyShareText(result) {
+  const blocks = result.history.map((h) => (h.pts >= 4500 ? "🟩" : h.pts >= 2500 ? "🟨" : "🟥")).join("");
+  return `GlobeGames Daily #${dailyDayNumber()} — ${result.totalScore}/${result.rounds * 5000} pts\n${blocks}\n${location.origin}${location.pathname}#geoguesser`;
 }
 
 function scoreForDistance(km) {
@@ -223,14 +279,24 @@ window.ggAutoJoin = async function (code) {
 function drawStartScreen() {
   clearLobbyFromUrl();
   const mpAvailable = hasMultiplayerConfig();
+  const streakBest = getStreakBest();
+  const dailyResult = getDailyResult();
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Waar op aarde is dit?</div></div></div>
     <div class="card" style="cursor:pointer;" onclick="ggShowSoloSettings()">
       <span class="icon">🧍</span><h3>Solo spelen</h3>
-      <p>Kies je rondes en locaties, speel op je eigen tempo.</p>
+      <p>Kies je rondes, locaties en moeilijkheidsgraad.</p>
     </div>
-    <div class="card" style="cursor:${mpAvailable ? "pointer" : "default"}; opacity:${mpAvailable ? "1" : "0.55"};"
+    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="ggStartStreak()">
+      <span class="icon">🔥</span><h3>Streak</h3>
+      <p>Raad landen op rij, zo lang je kan. Beste streak: <strong>${streakBest}</strong></p>
+    </div>
+    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="ggStartDaily()">
+      <span class="icon">📅</span><h3>Dagelijkse challenge</h3>
+      <p>${dailyResult ? `Vandaag al gespeeld: <strong>${dailyResult.totalScore} pts</strong> — bekijk je resultaat.` : "5 vaste rondes, elke dag hetzelfde voor iedereen."}</p>
+    </div>
+    <div class="card" style="cursor:${mpAvailable ? "pointer" : "default"}; opacity:${mpAvailable ? "1" : "0.55"}; margin-top:12px;"
       ${mpAvailable ? 'onclick="ggShowMultiplayerMenu()"' : ""}>
       <span class="icon">👥</span><h3>Met vrienden (multiplayer)</h3>
       <p>${mpAvailable ? "Maak een lobby of join er een met een code." : "Multiplayer niet ingesteld (Supabase-variabelen ontbreken)."}</p>
@@ -255,6 +321,15 @@ window.ggShowSoloSettings = function (prefill = {}) {
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
       <div class="gg-select-wrap"><select id="soloLocationSet" class="gg-select">${setOptions}</select></div>
+      <label class="gg-label" style="margin-top:16px;">Moeilijkheidsgraad</label>
+      <div class="gg-pill-row" id="soloDifficultyPills">
+        <button class="gg-pill-btn${(prefill.difficulty || "free") === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
+        <button class="gg-pill-btn${prefill.difficulty === "nomove" ? " active" : ""}" data-v="nomove">Niet bewegen</button>
+        <button class="gg-pill-btn${prefill.difficulty === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
+        <input type="checkbox" id="soloBlackWhite" ${prefill.blackwhite ? "checked" : ""} /> Zwart-wit
+      </label>
     </div>
     <div class="footerrow">
       <button class="btn" onclick="ggShowStart()">← Terug</button>
@@ -265,6 +340,11 @@ window.ggShowSoloSettings = function (prefill = {}) {
     document.querySelectorAll("#soloRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
   });
+  document.getElementById("soloDifficultyPills").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-v]"); if (!btn) return;
+    document.querySelectorAll("#soloDifficultyPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+  });
 };
 
 window.ggShowStart = function () { drawStartScreen(); };
@@ -273,7 +353,10 @@ window.ggStartSolo = function () {
   const roundBtn = document.querySelector("#soloRoundPills .gg-pill-btn.active");
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5;
   const locSet = document.getElementById("soloLocationSet")?.value || "world";
-  gg = { mode: "solo", round: 0, totalScore: 0, rounds, locationSet: locSet,
+  const diffBtn = document.querySelector("#soloDifficultyPills .gg-pill-btn.active");
+  const difficulty = diffBtn ? diffBtn.dataset.v : "free";
+  const blackwhite = !!document.getElementById("soloBlackWhite")?.checked;
+  gg = { mode: "solo", round: 0, totalScore: 0, rounds, locationSet: locSet, difficulty, blackwhite,
     pointFn: buildPointFn(locSet), usedPanos: new Set(), history: [],
     current: null, guess: null, map: null, guessMarker: null, resultMap: null, panorama: null };
   nextSoloRound();
@@ -372,6 +455,7 @@ function showSoloResultOverlay(km, pts) {
   document.getElementById("ggNextRoundBtn").onclick = () => {
     if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
     if (gg.round < gg.rounds) { overlay.remove(); nextSoloRound(); }
+    else if (gg.mode === "daily") { teardown(); showDailyFinalScore(); }
     else { teardown(); showSoloFinalScore(); }
   };
 
@@ -435,6 +519,156 @@ function showSoloFinalScore() {
 }
 
 window.ggExitToStart = function () { teardown(); drawStartScreen(); };
+
+// ---------- Streak mode ----------
+
+window.ggStartStreak = function () {
+  gg = { mode: "streak", streak: 0, best: getStreakBest(), difficulty: "free", blackwhite: false,
+    pointFn: buildPointFn("world"), usedPanos: new Set(), current: null, panorama: null };
+  nextStreakRound();
+};
+
+async function nextStreakRound() {
+  gg.panorama = null;
+  drawFullscreenLoading(`🔥 Streak: ${gg.streak}`);
+  const maps = await loadGoogleMaps();
+
+  let round = null, attempts = 0;
+  while (attempts < 20) {
+    const candidate = await findStreetViewRound(maps, gg.pointFn);
+    if (candidate && !gg.usedPanos.has(candidate.pano)) { round = candidate; gg.usedPanos.add(candidate.pano); break; }
+    attempts++;
+  }
+
+  if (!round) {
+    document.getElementById("ggFullscreenWrap")?.remove();
+    app.innerHTML = `${topbar()}
+      <div class="gametitle"><div><h2>🔥 Streak</h2></div></div>
+      <div class="card" style="cursor:default;">
+        <span class="icon">📡</span><h3>Geen Street View gevonden</h3>
+        <p>Probeer het opnieuw.</p>
+        <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">Opnieuw</button>
+      </div>`;
+    return;
+  }
+
+  gg.current = round;
+  drawStreakRoundScreen();
+  initPanorama(round);
+}
+
+function drawStreakRoundScreen() {
+  document.getElementById("ggFullscreenWrap")?.remove();
+  const wrap = document.createElement("div");
+  wrap.id = "ggFullscreenWrap";
+  wrap.className = "gg-fullscreen-wrap";
+  wrap.innerHTML = `
+    <div id="ggStreetView" class="gg-pano-container"></div>
+    <div class="gg-pano-loading" id="ggPanoLoading">
+      <div class="ggspinner"></div>
+      <div class="gg-pano-loading-text">Panorama laden...</div>
+    </div>
+    <div class="gg-hud-top" id="ggHudTop">
+      <button class="gg-hud-back-btn" onclick="ggExitToStart()">✕</button>
+      <span class="gg-hud-pill">🔥 Streak: ${gg.streak}</span>
+      <span class="gg-hud-pill">Beste: ${gg.best}</span>
+    </div>
+    <div class="gg-streak-panel" id="ggStreakPanel">
+      <div class="gg-map-corner-header"><span class="gg-map-guess-info">Welk land is dit?</span></div>
+      <div style="padding:0 14px 14px; position:relative;">
+        <input id="ggStreakInput" type="text" autocomplete="off" placeholder="Typ een land..."
+          style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
+        <div class="autocomplete" id="ggStreakAuto"></div>
+      </div>
+      <div class="gg-map-footer">
+        <button class="btn primary gg-submit-btn" id="ggSubmitBtn">📍 Bevestig gok</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const input = document.getElementById("ggStreakInput");
+  const dd = document.getElementById("ggStreakAuto");
+  attachAutocomplete(input, dd, candidateNames(ALL_NAMES), () => {});
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitStreakGuess(); });
+  input.focus();
+  document.getElementById("ggSubmitBtn").onclick = submitStreakGuess;
+}
+
+function submitStreakGuess() {
+  const input = document.getElementById("ggStreakInput");
+  const guess = findCountryByLoose(input?.value || "");
+  if (!guess) { input?.focus(); return; }
+  const correct = guess === gg.current.countryHint;
+  if (correct) {
+    gg.streak++;
+    if (gg.streak > gg.best) { gg.best = gg.streak; setStreakBest(gg.best); }
+    nextStreakRound();
+  } else {
+    showStreakGameOver(guess);
+  }
+}
+
+function showStreakGameOver(guess) {
+  document.getElementById("ggFullscreenWrap")?.remove();
+  const isNewBest = gg.streak > 0 && gg.streak >= gg.best;
+  app.innerHTML = `${topbar()}
+    <div class="gametitle"><div><h2>🔥 Streak voorbij</h2></div></div>
+    <div class="card" style="cursor:default; text-align:center;">
+      <span class="icon">💥</span>
+      <h3>Streak: ${gg.streak}</h3>
+      <p>Het juiste antwoord was <strong>${gg.current.countryHint}</strong>, jij gokte <strong>${guess}</strong>.</p>
+      <p class="small">${isNewBest ? "🎉 Nieuwe beste streak!" : `Beste streak: ${gg.best}`}</p>
+      <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">Opnieuw</button>
+    </div>
+    <div class="footerrow"><button class="btn" onclick="ggShowStart()">← Menu</button><div></div></div>`;
+}
+
+// ---------- Daily challenge ----------
+
+window.ggStartDaily = function () {
+  const existing = getDailyResult();
+  if (existing) { showDailyResult(existing); return; }
+  const rng = mulberry32(hashStringToSeed(getDailyKey()));
+  gg = { mode: "daily", round: 0, totalScore: 0, rounds: 5, locationSet: "world",
+    difficulty: "free", blackwhite: false,
+    pointFn: buildPointFn("world", rng), usedPanos: new Set(), history: [],
+    current: null, guess: null, map: null, guessMarker: null, resultMap: null, panorama: null };
+  nextSoloRound();
+};
+
+function showDailyFinalScore() {
+  const result = { date: getDailyKey(), totalScore: gg.totalScore, rounds: gg.rounds, history: gg.history };
+  saveDailyResult(result);
+  showDailyResult(result);
+}
+
+function showDailyResult(result) {
+  const shareText = buildDailyShareText(result);
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>📅 Dagelijkse challenge</h2><div class="desc">${result.date}</div></div></div>
+    <div class="card" style="cursor:default; text-align:center;">
+      <span class="icon">🏁</span>
+      <h3>${result.totalScore} / ${result.rounds * 5000} punten</h3>
+      <button class="btn primary" id="ggDailyCopyBtn" style="margin-top:10px;">📋 Kopieer resultaat</button>
+    </div>
+    <div class="guesslist" style="margin-top:14px;">
+      ${result.history.map((h, i) => `<div class="gitem">
+        <div class="name">Ronde ${i+1} · ${h.country}</div>
+        <div class="dist">${Math.round(h.km).toLocaleString()} km</div>
+        <div></div><div class="prox">${h.pts} pts</div>
+      </div>`).join("")}
+    </div>
+    <div class="footerrow"><button class="btn" onclick="ggShowStart()">← Menu</button><div></div></div>`;
+  const copyBtn = document.getElementById("ggDailyCopyBtn");
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(shareText).catch(() => {});
+      copyBtn.textContent = "✓ Gekopieerd!";
+      setTimeout(() => { copyBtn.textContent = "📋 Kopieer resultaat"; }, 2000);
+    };
+  }
+}
 
 // ---------- Multiplayer: menu ----------
 
@@ -931,7 +1165,23 @@ async function initPanorama(round) {
   const maps = await loadGoogleMaps();
   const el = document.getElementById("ggStreetView");
   if (!el) return;
-  gg.panorama = createPanorama(maps, el, round);
+  const noMove = gg.difficulty === "nomove" || gg.difficulty === "nmpz";
+  gg.panorama = createPanorama(maps, el, round, { noMove });
+  el.classList.toggle("gg-grayscale", !!gg.blackwhite);
+
+  // NMPZ: no movement, no panning/zooming at all — a transparent blocker
+  // absorbs every mouse/touch/scroll event before it reaches the panorama.
+  // The Street View API has no "freeze" option, so this is the reliable way.
+  if (gg.difficulty === "nmpz") {
+    const wrap = document.getElementById("ggFullscreenWrap");
+    if (wrap && !document.getElementById("ggNmpzBlocker")) {
+      const blocker = document.createElement("div");
+      blocker.id = "ggNmpzBlocker";
+      blocker.className = "gg-nmpz-blocker";
+      wrap.insertBefore(blocker, wrap.querySelector(".gg-hud-top") || null);
+    }
+  }
+
   // Hide the loading overlay once the panorama actually has imagery to show,
   // instead of leaving a bare black screen while the tiles fetch.
   const hideLoading = () => document.getElementById("ggPanoLoading")?.classList.add("gg-hidden");

@@ -86,7 +86,8 @@ export async function findStreetViewRound(
   return null;
 }
 
-export function createPanorama(maps, el, { lat, lng, pano }) {
+export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
+  const { noMove = false } = options;
   const panorama = new maps.StreetViewPanorama(el, {
     position: { lat, lng },
     pano: pano || undefined,
@@ -97,16 +98,18 @@ export function createPanorama(maps, el, { lat, lng, pano }) {
     motionTracking: false,
     motionTrackingControl: false,
     showRoadLabels: false,
-    linksControl: true,
+    // "Niet bewegen"/NMPZ difficulty: hide the walking arrows and disable
+    // click-to-walk, but leave looking around (drag) and zoom intact.
+    linksControl: !noMove,
+    clickToGo: !noMove,
     panControl: true,
     zoomControl: true,
-    clickToGo: true,
     // Google normally auto zooms in at intersections when walking, which
     // pulls in extra high-res tiles and is a big part of the "laggy" feel.
     // Keeping the zoom fixed makes movement noticeably snappier.
     enableCloseUp: false,
   });
-  warmNeighboringPanoramas(maps, panorama);
+  if (!noMove) warmNeighboringPanoramas(maps, panorama);
   return panorama;
 }
 

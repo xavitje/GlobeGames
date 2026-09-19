@@ -606,6 +606,43 @@ code {
   pointer-events: none;
 }
 
+/* Zwart-wit moeilijkheidsgraad */
+.gg-grayscale {
+  filter: grayscale(1);
+}
+
+/* NMPZ: absorbs all pointer/touch/scroll input so the panorama can't move,
+   pan or zoom at all. Sits above the panorama, below the HUD. */
+.gg-nmpz-blocker {
+  position: absolute;
+  inset: 0;
+  z-index: 240;
+  cursor: default;
+}
+
+/* Streak-modus: zelfde donkere paneel-look als de gok-kaart, maar met een
+   land-invoerveld i.p.v. een kaart. */
+.gg-streak-panel {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  z-index: 300;
+  width: 340px;
+  max-width: 92vw;
+  background: rgba(15, 16, 22, 0.88);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px;
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+}
+.gg-streak-panel .autocomplete {
+  right: 0;
+}
+
 /* ---------- Top HUD ---------- */
 .gg-hud-top {
   position: absolute;
