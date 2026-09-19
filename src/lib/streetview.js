@@ -87,7 +87,7 @@ export async function findStreetViewRound(
 }
 
 export function createPanorama(maps, el, { lat, lng, pano }) {
-  return new maps.StreetViewPanorama(el, {
+  const panorama = new maps.StreetViewPanorama(el, {
     position: { lat, lng },
     pano: pano || undefined,
     pov: { heading: Math.random() * 360, pitch: 0 },
@@ -106,4 +106,23 @@ export function createPanorama(maps, el, { lat, lng, pano }) {
     // Keeping the zoom fixed makes movement noticeably snappier.
     enableCloseUp: false,
   });
+  warmNeighboringPanoramas(maps, panorama);
+  return panorama;
+}
+
+// Quietly asks Google for the panoramas one step away in every direction the
+// player could walk. This doesn't put anything in our own cache (Google
+// controls that), but it does warm up the connection/DNS/TLS and lets
+// Google's own CDN start working on those tiles before the player actually
+// clicks, so the next step tends to feel snappier.
+function warmNeighboringPanoramas(maps, panorama) {
+  const sv = new maps.StreetViewService();
+  const warm = () => {
+    const links = panorama.getLinks() || [];
+    links.forEach((link) => {
+      if (!link || !link.pano) return;
+      sv.getPanorama({ pano: link.pano }, () => {});
+    });
+  };
+  maps.event.addListener(panorama, "links_changed", warm);
 }

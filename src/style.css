@@ -683,8 +683,11 @@ code {
   background: rgba(15, 16, 22, 0.88);
   border: 1px solid rgba(255,255,255,0.14);
   border-radius: 18px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  /* Lower blur radius: a lot cheaper to composite (matters more when GPU
+     compositing is unavailable and it falls back to software), with barely
+     a visible difference here. */
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
   box-shadow: 0 8px 32px rgba(0,0,0,0.55);
   overflow: hidden;
   display: flex;

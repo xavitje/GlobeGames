@@ -189,6 +189,11 @@ export function renderGeoGuesser(rootEl) {
     return;
   }
 
+  // Fire-and-forget: get the Google Maps script loading/connecting the
+  // moment someone opens GeoGuesser, instead of only once a round starts.
+  // By the time a round actually needs it, the library is already warm.
+  loadGoogleMaps().catch(() => {});
+
   const urlLobby = getLobbyFromUrl();
   if (urlLobby && hasMultiplayerConfig()) { drawAutoJoinScreen(urlLobby); return; }
   drawStartScreen();
