@@ -582,6 +582,30 @@ code {
   height: 100%;
 }
 
+/* Loading overlay so you never see a bare black screen while the
+   panorama tiles fetch. */
+.gg-pano-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--panel2);
+  transition: opacity 0.25s ease;
+}
+.gg-pano-loading-text {
+  color: #fff;
+  font-size: 14px;
+  opacity: 0.7;
+}
+.gg-pano-loading.gg-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ---------- Top HUD ---------- */
 .gg-hud-top {
   position: absolute;
@@ -636,6 +660,17 @@ code {
   border: none;
   font-size: 12px;
   margin-left: auto;
+}
+.gg-hud-timer {
+  color: #ffd86b;
+}
+.gg-hud-timer-low {
+  color: #ff5c7c;
+  animation: gg-timer-pulse 1s ease-in-out infinite;
+}
+@keyframes gg-timer-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 /* ---------- Floating map corner ---------- */

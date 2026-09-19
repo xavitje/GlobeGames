@@ -61,6 +61,86 @@ function scoreForDistance(km) {
   return Math.max(0, Math.round(5000 * Math.exp(-km / 2000)));
 }
 
+// ---------- Multiplayer round timer (host-configurable) ----------
+
+function timerSettingHtml(idPrefix, seconds) {
+  const enabled = seconds != null;
+  const val = seconds || 60;
+  return `
+    <label class="gg-label" style="margin-top:16px;">Tijdslimiet per ronde</label>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap:wrap;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+        <input type="checkbox" id="${idPrefix}TimerEnabled" ${enabled ? "checked" : ""} />
+        Aan
+      </label>
+      <input type="number" id="${idPrefix}TimerSeconds" min="30" max="180" step="15" value="${val}"
+        ${enabled ? "" : "disabled"}
+        style="width:80px; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
+      <span class="small">seconden (30–180)</span>
+    </div>`;
+}
+
+function wireTimerSetting(idPrefix) {
+  const checkbox = document.getElementById(`${idPrefix}TimerEnabled`);
+  const numInput = document.getElementById(`${idPrefix}TimerSeconds`);
+  if (!checkbox || !numInput) return;
+  checkbox.addEventListener("change", () => { numInput.disabled = !checkbox.checked; });
+}
+
+function readTimerSetting(idPrefix) {
+  const checkbox = document.getElementById(`${idPrefix}TimerEnabled`);
+  const numInput = document.getElementById(`${idPrefix}TimerSeconds`);
+  if (!checkbox || !checkbox.checked) return null;
+  let v = parseInt(numInput.value, 10);
+  if (Number.isNaN(v)) v = 60;
+  return Math.min(180, Math.max(30, v));
+}
+
+function clearRoundTimer() {
+  if (gg?.roundTimer) { clearInterval(gg.roundTimer); gg.roundTimer = null; }
+  document.getElementById("ggHudTimer")?.remove();
+}
+
+function startRoundTimer(seconds) {
+  clearRoundTimer();
+  gg.timerDeadline = Date.now() + seconds * 1000;
+  const hud = document.getElementById("ggHudTop");
+  if (hud) {
+    const pill = document.createElement("span");
+    pill.className = "gg-hud-pill gg-hud-timer";
+    pill.id = "ggHudTimer";
+    hud.appendChild(pill);
+  }
+  const tick = () => {
+    const remain = Math.max(0, Math.ceil((gg.timerDeadline - Date.now()) / 1000));
+    const pill = document.getElementById("ggHudTimer");
+    if (pill) {
+      const m = Math.floor(remain / 60), s = remain % 60;
+      pill.textContent = `⏱ ${m}:${String(s).padStart(2, "0")}`;
+      pill.classList.toggle("gg-hud-timer-low", remain <= 10);
+    }
+    if (remain <= 0) { clearRoundTimer(); onRoundTimeUp(); }
+  };
+  tick();
+  gg.roundTimer = setInterval(tick, 250);
+}
+
+function onRoundTimeUp() {
+  if (!gg || gg.mode !== "mp" || gg.screen !== "round") return;
+  if (!gg.submitted) {
+    if (gg.guess) {
+      submitMpGuess();
+    } else {
+      gg.submitted = true;
+      const btn = document.getElementById("ggSubmitBtn");
+      if (btn) btn.disabled = true;
+      const info = document.getElementById("ggGuessInfo");
+      if (info) info.textContent = "Tijd voorbij — geen gok geplaatst ✗";
+    }
+  }
+  if (gg.isHost) hostFinishRound();
+}
+
 function clearGoogleMap(mapRef) {
   if (mapRef && window.google?.maps) {
     window.google.maps.event.clearInstanceListeners(mapRef);
@@ -72,7 +152,7 @@ function teardown() {
   if (gg?.map) { clearGoogleMap(gg.map); gg.map = null; gg.guessMarker = null; }
   if (gg?.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   if (gg?.room) { gg.room.leave(); gg.room = null; }
-  if (gg?.roundTimer) { clearTimeout(gg.roundTimer); gg.roundTimer = null; }
+  clearRoundTimer();
   const wrap = document.getElementById("ggFullscreenWrap");
   if (wrap) wrap.remove();
 }
@@ -372,6 +452,7 @@ window.ggShowMultiplayerMenu = function () {
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
       <div class="gg-select-wrap"><select id="mpLocationSet" class="gg-select">${setOptions}</select></div>
+      ${timerSettingHtml("mp", null)}
     </div>
     <div class="card" style="cursor:pointer; margin-top:12px;" onclick="ggHostLobby()">
       <span class="icon">➕</span><h3>Nieuwe lobby maken</h3>
@@ -393,6 +474,7 @@ window.ggShowMultiplayerMenu = function () {
     document.querySelectorAll("#mpRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
   });
+  wireTimerSetting("mp");
 };
 
 function getPlayerName() {
@@ -403,7 +485,11 @@ function getPlayerName() {
 
 function getMpSettings() {
   const roundBtn = document.querySelector("#mpRoundPills .gg-pill-btn.active");
-  return { rounds: roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5, locationSet: document.getElementById("mpLocationSet")?.value || "world" };
+  return {
+    rounds: roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5,
+    locationSet: document.getElementById("mpLocationSet")?.value || "world",
+    roundTime: readTimerSetting("mp"),
+  };
 }
 
 window.ggHostLobby = async function () {
@@ -426,10 +512,11 @@ async function enterLobby(code, name, isHost, settings) {
 
   gg = { mode: "mp", room, isHost, playerId, name, round: 0,
     rounds: settings?.rounds ?? 5, locationSet: settings?.locationSet ?? "world",
+    roundTime: settings?.roundTime ?? null,
     pointFn: buildPointFn(settings?.locationSet ?? "world"),
     usedPanos: new Set(), scoreboard: {}, history: [], guess: null, submitted: false,
     map: null, guessMarker: null, resultMap: null, panorama: null,
-    currentGuesses: {}, roundStartPlayers: [] };
+    currentGuesses: {}, roundStartPlayers: [], roundTimer: null };
 
   try { await room.connect(); }
   catch (e) {
@@ -473,6 +560,7 @@ async function enterLobby(code, name, isHost, settings) {
 function onMpSettingsReceived(payload) {
   if (gg.isHost) return;
   gg.rounds = payload.rounds; gg.locationSet = payload.locationSet;
+  gg.roundTime = payload.roundTime ?? null;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
@@ -490,7 +578,7 @@ function drawLobbyWaiting() {
         <input class="gg-share-input" id="ggShareUrl" value="${shareUrl}" readonly />
         <button class="btn" onclick="ggCopyLink()">📋 Kopieer</button>
       </div>
-      ${gg.isHost ? `<div class="small" style="margin-top:8px;">⚙️ ${gg.rounds} rondes · ${setLabel}</div>` : ""}
+      ${gg.isHost ? `<div class="small" style="margin-top:8px;">⚙️ ${gg.rounds} rondes · ${setLabel}${gg.roundTime ? ` · ⏱ ${gg.roundTime}s per ronde` : ""}</div>` : ""}
     </div>
     <div class="guesslist" style="margin-top:14px;">
       ${players.map(p => `<div class="gitem">
@@ -518,7 +606,7 @@ window.ggMpStartGame = function () {
   if (!gg.isHost) return;
   gg.scoreboard = {}; gg.usedPanos = new Set(); gg.history = []; gg.round = 0;
   gg.room.players().forEach(p => { gg.scoreboard[p.playerId] = { name: p.name, total: 0 }; });
-  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet });
+  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime });
   hostAdvanceRound();
 };
 
@@ -568,6 +656,9 @@ function onMpRoundStart(payload) {
       hud.appendChild(btn);
     }
   }
+
+  if (gg.roundTime) startRoundTimer(gg.roundTime);
+  else clearRoundTimer();
 }
 
 function playerScore() {
@@ -610,6 +701,7 @@ function hostFinishRound() {
 
 function onMpResults(payload) {
   if (payload.round !== gg.round) return;
+  clearRoundTimer();
   gg.scoreboard = payload.scoreboard;
   gg.submitted = true;
   if (gg.map) { clearGoogleMap(gg.map); gg.map = null; gg.guessMarker = null; }
@@ -738,6 +830,7 @@ function onMpGameOver(payload) {
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
       <div class="gg-select-wrap"><select id="restartLocationSet" class="gg-select">${setOptions}</select></div>
+      ${timerSettingHtml("restart", gg.roundTime)}
     </div>` : `<div class="card" style="cursor:default; margin-top:14px; text-align:center;">
       <div class="small">Wachten tot de host een nieuw spel start...</div>
     </div>`}
@@ -752,6 +845,7 @@ function onMpGameOver(payload) {
       document.querySelectorAll("#restartRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
     });
+    wireTimerSetting("restart");
   }
 }
 
@@ -760,15 +854,17 @@ window.ggMpRestartGame = function () {
   const roundBtn = document.querySelector("#restartRoundPills .gg-pill-btn.active");
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : gg.rounds;
   const locSet = document.getElementById("restartLocationSet")?.value || gg.locationSet;
-  gg.rounds = rounds; gg.locationSet = locSet; gg.pointFn = buildPointFn(locSet);
-  gg.room.send("restart", { rounds, locationSet: locSet });
-  gg.room.send("settings", { rounds, locationSet: locSet });
+  const roundTime = readTimerSetting("restart");
+  gg.rounds = rounds; gg.locationSet = locSet; gg.roundTime = roundTime; gg.pointFn = buildPointFn(locSet);
+  gg.room.send("restart", { rounds, locationSet: locSet, roundTime });
+  gg.room.send("settings", { rounds, locationSet: locSet, roundTime });
   window.ggMpStartGame();
 };
 
 function onMpRestart(payload) {
   if (gg.isHost) return;
   gg.rounds = payload.rounds; gg.locationSet = payload.locationSet;
+  gg.roundTime = payload.roundTime ?? null;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
@@ -781,6 +877,10 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   wrap.className = "gg-fullscreen-wrap";
   wrap.innerHTML = `
     <div id="ggStreetView" class="gg-pano-container"></div>
+    <div class="gg-pano-loading" id="ggPanoLoading">
+      <div class="ggspinner"></div>
+      <div class="gg-pano-loading-text">Panorama laden...</div>
+    </div>
     <div class="gg-hud-top" id="ggHudTop">
       <button class="gg-hud-back-btn" onclick="ggExitToStart()">✕</button>
       <span class="gg-hud-pill">${roundLabel}</span>
@@ -827,6 +927,13 @@ async function initPanorama(round) {
   const el = document.getElementById("ggStreetView");
   if (!el) return;
   gg.panorama = createPanorama(maps, el, round);
+  // Hide the loading overlay once the panorama actually has imagery to show,
+  // instead of leaving a bare black screen while the tiles fetch.
+  const hideLoading = () => document.getElementById("ggPanoLoading")?.classList.add("gg-hidden");
+  maps.event.addListenerOnce(gg.panorama, "status_changed", hideLoading);
+  maps.event.addListenerOnce(gg.panorama, "pano_changed", hideLoading);
+  // Safety net in case neither event fires for some reason.
+  setTimeout(hideLoading, 4000);
 }
 
 function initMap(mapsApi) {
@@ -837,7 +944,7 @@ function initMap(mapsApi) {
     center: { lat: 20, lng: 10 },
     zoom: 2, minZoom: 1,
     mapTypeId: "roadmap",
-    styles: DARK_MAP_STYLE,
+    // Standard light Google Maps look (like OpenGuessr), not the dark style.
     disableDefaultUI: true,
     zoomControl: true,
     gestureHandling: "greedy",
@@ -852,10 +959,8 @@ function initMap(mapsApi) {
     document.querySelectorAll("#ggMapTypeToggle button").forEach(b => b.classList.toggle("active", b === btn));
     if (type === "satellite") {
       map.setMapTypeId("hybrid"); // satellite + English labels
-      map.setOptions({ styles: null });
     } else {
       map.setMapTypeId("roadmap");
-      map.setOptions({ styles: DARK_MAP_STYLE });
     }
   });
 
