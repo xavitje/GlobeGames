@@ -1053,3 +1053,27 @@ a.linklike {
   background: linear-gradient(90deg, #ff5f6d, #ffc371);
   transition: width 0.4s ease;
 }
+
+/* ---------- Multiplayer join: code-vakjes per teken ---------- */
+.gg-code-boxes {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.gg-code-box {
+  width: 52px;
+  height: 60px;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: inherit;
+}
+.gg-code-box:focus {
+  outline: none;
+  border-color: var(--accent, #7c5cff);
+}
