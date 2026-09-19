@@ -4,6 +4,7 @@ import { renderGeoHunt } from "./games/geohunt.js";
 import { renderSilhouette } from "./games/silhouette.js";
 import { renderGlobleGame } from "./games/globle.js";
 import { renderGeoGuesser } from "./games/geoguesser.js";
+import { ensureProfileWidget } from "./lib/profile.js";
 
 const app = document.getElementById("app");
 
@@ -62,3 +63,4 @@ window.go = function (view) {
 
 window.addEventListener("hashchange", renderRoute);
 renderRoute();
+ensureProfileWidget();

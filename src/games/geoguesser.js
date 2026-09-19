@@ -12,6 +12,7 @@ import {
   randomRoomCode,
   randomPlayerId,
 } from "../lib/multiplayer.js";
+import { getProfile, saveProfile } from "../lib/profile.js";
 
 let app;
 let gg = null;
@@ -395,7 +396,7 @@ function drawAutoJoinScreen(code) {
     <div class="gametitle"><div><h2>👥 Lobby joinen</h2><div class="desc">Je bent uitgenodigd voor lobby <strong>${code.toUpperCase()}</strong>.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggAutoJoinName" type="text" placeholder="Typ je naam..." maxlength="18"
+      <input id="ggAutoJoinName" type="text" placeholder="Typ je naam..." maxlength="18" value="${getProfile().name || ''}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="footerrow">
@@ -406,7 +407,12 @@ function drawAutoJoinScreen(code) {
 
 window.ggAutoJoin = async function (code) {
   const input = document.getElementById("ggAutoJoinName");
-  const name = (input?.value.trim()) || "Speler" + Math.floor(Math.random() * 900 + 100);
+  const typed = (input?.value.trim()) || "";
+  if (typed) {
+    const p = getProfile();
+    if (p.name !== typed) saveProfile({ ...p, name: typed });
+  }
+  const name = typed || "Speler" + Math.floor(Math.random() * 900 + 100);
   await enterLobby(code, name, false, null);
 };
 
@@ -866,7 +872,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
     <div class="gametitle"><div><h2>➕ Lobby hosten</h2><div class="desc">Stel je lobby in en maak 'm aan.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || ""}"
+      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || getProfile().name || ''}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; margin-top:12px;">
@@ -902,7 +908,7 @@ window.ggShowMpJoin = function (prefill = {}) {
     <div class="gametitle"><div><h2>🔑 Lobby joinen</h2><div class="desc">Vul de code in die je hebt gekregen.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || ""}"
+      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || getProfile().name || ''}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; text-align:center; margin-top:12px;">
@@ -946,6 +952,10 @@ function ggSubmitMpJoin() {
 function getPlayerName() {
   const input = document.getElementById("ggNameInput");
   const name = (input?.value.trim()) || "";
+  if (name) {
+    const p = getProfile();
+    if (p.name !== name) saveProfile({ ...p, name });
+  }
   return name || "Speler" + Math.floor(Math.random() * 900 + 100);
 }
 
