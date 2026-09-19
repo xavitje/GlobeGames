@@ -685,7 +685,9 @@ window.ggShowMultiplayerMenu = function () {
     </div>
     <div class="card" style="cursor:default; margin-top:12px;">
       <h3 style="margin-bottom:14px;">🎮 Lobby-instellingen <span class="small">(voor nieuwe lobby)</span></h3>
-      <label class="gg-label">Aantal rondes</label>
+      <label class="gg-label">Spelmodus</label>
+      <div class="gg-select-wrap"><select id="mpGameMode" class="gg-select">${gameModeOptionsHtml("ffa")}</select></div>
+      <label class="gg-label" style="margin-top:16px;">Aantal rondes</label>
       <div class="gg-pill-row" id="mpRoundPills">
         ${[3,5,7,10].map(n => `<button class="gg-pill-btn${n===5?" active":""}" data-v="${n}">${n}</button>`).join("")}
       </div>
@@ -728,8 +730,68 @@ function getMpSettings() {
     rounds: roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5,
     locationSet: document.getElementById("mpLocationSet")?.value || "world",
     roundTime: readTimerSetting("mp"),
+    gameMode: document.getElementById("mpGameMode")?.value || "ffa",
   };
 }
+
+// ---------- Spelmodi (FFA / Duels / Team Duels / Battle Royale) ----------
+
+const GAME_MODES = {
+  ffa: { label: "FFA (iedereen tegelijk)", minPlayers: 2 },
+  duels: { label: "Duels (1v1)", minPlayers: 2, exactPlayers: 2 },
+  teamduels: { label: "Team Duels (2 teams)", minPlayers: 2 },
+  br: { label: "Battle Royale", minPlayers: 3 },
+};
+
+function gameModeOptionsHtml(selected) {
+  return Object.entries(GAME_MODES)
+    .map(([key, m]) => `<option value="${key}" ${key === selected ? "selected" : ""}>${m.label}</option>`)
+    .join("");
+}
+
+// Whether the host can currently press "Start spel", plus a reason when not.
+function checkCanStartGame() {
+  const mode = GAME_MODES[gg.gameMode] || GAME_MODES.ffa;
+  const players = gg.room.players();
+  if (mode.exactPlayers && players.length !== mode.exactPlayers) {
+    return { ok: false, reason: `${mode.label} heeft precies ${mode.exactPlayers} spelers nodig — nu: ${players.length}.` };
+  }
+  if (players.length < mode.minPlayers) {
+    return { ok: false, reason: `${mode.label} heeft minstens ${mode.minPlayers} spelers nodig — nu: ${players.length}.` };
+  }
+  if (gg.gameMode === "teamduels") {
+    const teamA = players.filter(p => gg.teams?.[p.playerId] === "A");
+    const teamB = players.filter(p => gg.teams?.[p.playerId] === "B");
+    if (teamA.length === 0 || teamB.length === 0) {
+      return { ok: false, reason: "Beide teams hebben minstens 1 speler nodig." };
+    }
+  }
+  return { ok: true, reason: "" };
+}
+
+function onMpTeamsReceived(payload) {
+  gg.teams = payload.teams || {};
+  if (gg.screen === "lobby") drawLobbyWaiting();
+}
+
+// Host-only: toggle one player between team A/B and broadcast the change.
+window.ggSetPlayerTeam = function (playerId, team) {
+  if (!gg.isHost) return;
+  gg.teams = { ...gg.teams, [playerId]: team };
+  gg.room.send("teams", { teams: gg.teams });
+  drawLobbyWaiting();
+};
+
+// Host-only: split everyone currently in the lobby evenly at random.
+window.ggRandomizeTeams = function () {
+  if (!gg.isHost) return;
+  const shuffled = [...gg.room.players()].sort(() => Math.random() - 0.5);
+  const teams = {};
+  shuffled.forEach((p, i) => { teams[p.playerId] = i % 2 === 0 ? "A" : "B"; });
+  gg.teams = teams;
+  gg.room.send("teams", { teams: gg.teams });
+  drawLobbyWaiting();
+};
 
 window.ggHostLobby = async function () {
   await enterLobby(randomRoomCode(), getPlayerName(), true, getMpSettings());
@@ -752,6 +814,8 @@ async function enterLobby(code, name, isHost, settings) {
   gg = { mode: "mp", room, isHost, playerId, name, round: 0,
     rounds: settings?.rounds ?? 5, locationSet: settings?.locationSet ?? "world",
     roundTime: settings?.roundTime ?? null,
+    gameMode: settings?.gameMode ?? "ffa", teams: {}, hp: {}, alive: new Set(), eliminated: [],
+    teamScore: { A: 0, B: 0 },
     pointFn: buildPointFn(settings?.locationSet ?? "world"),
     usedPanos: new Set(), scoreboard: {}, history: [], guess: null, submitted: false,
     map: null, guessMarker: null, resultMap: null, panorama: null,
@@ -774,8 +838,22 @@ async function enterLobby(code, name, isHost, settings) {
   room.on("gameover", onMpGameOver);
   room.on("settings", onMpSettingsReceived);
   room.on("restart", onMpRestart);
+  room.on("teams", onMpTeamsReceived);
 
   room.onPresence((players) => {
+    // Auto-assign new players to the smaller team in Team Duels lobbies.
+    if (gg?.isHost && gg.gameMode === "teamduels" && gg.screen === "lobby") {
+      let changed = false;
+      players.forEach((p) => {
+        if (!gg.teams[p.playerId]) {
+          const aCount = Object.values(gg.teams).filter((t) => t === "A").length;
+          const bCount = Object.values(gg.teams).filter((t) => t === "B").length;
+          gg.teams[p.playerId] = aCount <= bCount ? "A" : "B";
+          changed = true;
+        }
+      });
+      if (changed) gg.room.send("teams", { teams: gg.teams });
+    }
     if (gg?.screen === "lobby") drawLobbyWaiting();
     // Late-joiner catch-up
     if (gg?.isHost && gg.screen === "round" && gg.current) {
@@ -800,13 +878,35 @@ function onMpSettingsReceived(payload) {
   if (gg.isHost) return;
   gg.rounds = payload.rounds; gg.locationSet = payload.locationSet;
   gg.roundTime = payload.roundTime ?? null;
+  gg.gameMode = payload.gameMode ?? "ffa";
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
 function drawLobbyWaiting() {
   const players = gg.room.players();
   const setLabel = LOCATION_SETS[gg.locationSet]?.label || gg.locationSet;
+  const modeLabel = (GAME_MODES[gg.gameMode] || GAME_MODES.ffa).label;
   const shareUrl = `${location.origin}${location.pathname}#geoguesser?lobby=${gg.room.code}`;
+  const isTeamDuels = gg.gameMode === "teamduels";
+  const canStart = checkCanStartGame();
+
+  const teamsHtml = !isTeamDuels ? "" : `
+    <div class="card" style="cursor:default; margin-top:12px;">
+      <h3 style="margin-bottom:10px;">⚔️ Teams</h3>
+      <div class="gg-team-cols">
+        ${["A", "B"].map(team => `
+          <div class="gg-team-col">
+            <div class="gg-team-col-title">Team ${team}</div>
+            ${players.filter(p => gg.teams?.[p.playerId] === team).map(p => `
+              <div class="gg-team-chip">
+                ${p.name}${p.playerId === gg.playerId ? " (jij)" : ""}
+                ${gg.isHost ? `<button class="gg-team-swap" onclick="ggSetPlayerTeam('${p.playerId}','${team === "A" ? "B" : "A"}')" title="Naar team ${team === "A" ? "B" : "A"}">⇄</button>` : ""}
+              </div>`).join("") || `<div class="small" style="opacity:0.6;">Nog niemand</div>`}
+          </div>`).join("")}
+      </div>
+      ${gg.isHost ? `<button class="btn" style="margin-top:10px; width:100%;" onclick="ggRandomizeTeams()">🎲 Willekeurig verdelen</button>` : ""}
+    </div>`;
+
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>👥 Lobby ${gg.room.code}</h2><div class="desc">${gg.isHost ? "Deel de link met je vrienden." : "Wachten tot de host het spel start..."}</div></div></div>
@@ -817,17 +917,19 @@ function drawLobbyWaiting() {
         <input class="gg-share-input" id="ggShareUrl" value="${shareUrl}" readonly />
         <button class="btn" onclick="ggCopyLink()">📋 Kopieer</button>
       </div>
-      ${gg.isHost ? `<div class="small" style="margin-top:8px;">⚙️ ${gg.rounds} rondes · ${setLabel}${gg.roundTime ? ` · ⏱ ${gg.roundTime}s per ronde` : ""}</div>` : ""}
+      <div class="small" style="margin-top:8px;">🎮 ${modeLabel} · ${gg.rounds} rondes · ${setLabel}${gg.roundTime ? ` · ⏱ ${gg.roundTime}s per ronde` : ""}</div>
     </div>
+    ${teamsHtml}
     <div class="guesslist" style="margin-top:14px;">
       ${players.map(p => `<div class="gitem">
         <div class="name">${p.name}${p.playerId === gg.playerId ? " (jij)" : ""}</div>
         <div></div><div></div><div></div>
       </div>`).join("")}
     </div>
+    ${gg.isHost && !canStart.ok ? `<div class="small" style="color:var(--danger); margin-top:8px; text-align:center;">${canStart.reason}</div>` : ""}
     <div class="footerrow">
       <button class="btn" onclick="ggLeaveLobby()">← Lobby verlaten</button>
-      ${gg.isHost ? '<button class="btn primary" onclick="ggMpStartGame()">Start spel →</button>' : "<div></div>"}
+      ${gg.isHost ? `<button class="btn primary" ${canStart.ok ? "" : "disabled"} onclick="ggMpStartGame()">Start spel →</button>` : "<div></div>"}
     </div>`;
 }
 
@@ -843,9 +945,27 @@ window.ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); drawStartSc
 
 window.ggMpStartGame = function () {
   if (!gg.isHost) return;
+  const canStart = checkCanStartGame();
+  if (!canStart.ok) { alert(canStart.reason); return; }
+
   gg.scoreboard = {}; gg.usedPanos = new Set(); gg.history = []; gg.round = 0;
   gg.room.players().forEach(p => { gg.scoreboard[p.playerId] = { name: p.name, total: 0 }; });
-  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime });
+
+  gg.duelOver = false;
+  if (gg.gameMode === "duels") {
+    gg.hp = {};
+    gg.room.players().forEach(p => { gg.hp[p.playerId] = 5000; });
+  }
+  if (gg.gameMode === "teamduels") {
+    gg.teamScore = { A: 0, B: 0 };
+  }
+  if (gg.gameMode === "br") {
+    gg.alive = new Set(gg.room.players().map(p => p.playerId));
+    gg.eliminated = [];
+  }
+
+  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode });
+  gg.room.send("teams", { teams: gg.teams });
   hostAdvanceRound();
 };
 
@@ -853,8 +973,15 @@ window.ggMpStartGame = function () {
 
 async function hostAdvanceRound() {
   gg.round++;
-  if (gg.round > gg.rounds) {
-    gg.room.send("gameover", { scoreboard: gg.scoreboard, history: gg.history }); return;
+  const outOfRounds = gg.round > gg.rounds || gg.round > 15;
+  const duelDecided = gg.gameMode === "duels" && gg.duelOver;
+  const brDecided = gg.gameMode === "br" && gg.alive.size <= 1;
+  if (outOfRounds || duelDecided || brDecided) {
+    gg.room.send("gameover", {
+      scoreboard: gg.scoreboard, history: gg.history,
+      hp: gg.hp, teamScore: gg.teamScore, eliminated: gg.eliminated, alive: [...gg.alive],
+    });
+    return;
   }
   gg.screen = "loading";
   drawFullscreenLoading(`Ronde ${gg.round} / ${gg.rounds} — locatie zoeken...`);
@@ -918,7 +1045,10 @@ function submitMpGuess() {
 function onMpGuessReceived(payload) {
   if (!gg.isHost || payload.round !== gg.round) return;
   gg.currentGuesses[payload.from] = { name: payload.name, lat: payload.lat, lng: payload.lng };
-  if (Object.keys(gg.currentGuesses).length >= (gg.roundStartPlayers.length || 1)) hostFinishRound();
+  const expected = gg.gameMode === "br"
+    ? gg.roundStartPlayers.filter(p => gg.alive.has(p.playerId)).length
+    : gg.roundStartPlayers.length;
+  if (Object.keys(gg.currentGuesses).length >= (expected || 1)) hostFinishRound();
 }
 
 function hostFinishRound() {
@@ -933,8 +1063,45 @@ function hostFinishRound() {
     gg.scoreboard[playerId].name = g.name;
     return { playerId, name: g.name, lat: g.lat, lng: g.lng, km, pts };
   });
+
+  // Duels: distance-based damage to the opponent (real-GeoGuessr style HP).
+  let damage = {};
+  if (gg.gameMode === "duels" && guesses.length === 2) {
+    const [a, b] = guesses;
+    damage[a.playerId] = Math.max(0, a.pts - b.pts);
+    damage[b.playerId] = Math.max(0, b.pts - a.pts);
+    gg.hp[b.playerId] = Math.max(0, (gg.hp[b.playerId] ?? 5000) - damage[a.playerId]);
+    gg.hp[a.playerId] = Math.max(0, (gg.hp[a.playerId] ?? 5000) - damage[b.playerId]);
+    if (gg.hp[a.playerId] <= 0 || gg.hp[b.playerId] <= 0) gg.duelOver = true;
+  }
+
+  // Team Duels: only the team's best guess this round counts.
+  if (gg.gameMode === "teamduels") {
+    ["A", "B"].forEach((team) => {
+      const teamGuesses = guesses.filter((g) => gg.teams[g.playerId] === team);
+      if (teamGuesses.length) gg.teamScore[team] = (gg.teamScore[team] || 0) + Math.max(...teamGuesses.map((g) => g.pts));
+    });
+  }
+
+  // Battle Royale: whoever guessed worst this round is out (unless everyone tied).
+  let eliminatedThisRound = [];
+  if (gg.gameMode === "br") {
+    const aliveGuesses = guesses.filter((g) => gg.alive.has(g.playerId));
+    if (aliveGuesses.length > 1) {
+      const minPts = Math.min(...aliveGuesses.map((g) => g.pts));
+      const worst = aliveGuesses.filter((g) => g.pts === minPts);
+      if (worst.length < aliveGuesses.length) {
+        worst.forEach((g) => { gg.alive.delete(g.playerId); gg.eliminated.push(g.name); eliminatedThisRound.push(g.name); });
+      }
+    }
+  }
+
   gg.history.push({ round: gg.round, country: answer.countryHint, guesses });
-  gg.room.send("results", { round: gg.round, total: gg.rounds, answer, guesses, scoreboard: gg.scoreboard });
+  gg.room.send("results", {
+    round: gg.round, total: gg.rounds, answer, guesses, scoreboard: gg.scoreboard,
+    gameMode: gg.gameMode, damage, hp: gg.hp, teamScore: gg.teamScore,
+    eliminatedThisRound, eliminated: gg.eliminated, alive: [...gg.alive], duelOver: gg.duelOver,
+  });
   gg.finishingRound = false;
 }
 
@@ -942,6 +1109,11 @@ function onMpResults(payload) {
   if (payload.round !== gg.round) return;
   clearRoundTimer();
   gg.scoreboard = payload.scoreboard;
+  if (payload.hp) gg.hp = payload.hp;
+  if (payload.teamScore) gg.teamScore = payload.teamScore;
+  if (payload.alive) gg.alive = new Set(payload.alive);
+  if (payload.eliminated) gg.eliminated = payload.eliminated;
+  if (payload.duelOver) gg.duelOver = true;
   gg.submitted = true;
   if (gg.map) { clearGoogleMap(gg.map); gg.map = null; gg.guessMarker = null; }
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
@@ -951,7 +1123,44 @@ function onMpResults(payload) {
 
 function drawMpResultsScreen(payload) {
   const sorted = [...payload.guesses].sort((a, b) => b.pts - a.pts);
-  const isLast = gg.round >= gg.rounds;
+  const isLast = gg.round >= gg.rounds
+    || (gg.gameMode === "duels" && gg.duelOver)
+    || (gg.gameMode === "br" && gg.alive.size <= 1);
+
+  const modeExtraHtml = (() => {
+    if (gg.gameMode === "duels" && payload.hp) {
+      return `<div class="card" style="cursor:default; margin-top:10px;">
+        <h3 style="margin-bottom:10px;">❤️ Levens</h3>
+        ${Object.entries(payload.hp).map(([pid, hp]) => {
+          const g = payload.guesses.find(x => x.playerId === pid);
+          const name = g ? g.name : (gg.scoreboard[pid]?.name || "Speler");
+          const pct = Math.max(0, Math.min(100, Math.round(hp / 5000 * 100)));
+          const dmg = payload.damage?.[pid] || 0;
+          return `<div style="margin-bottom:8px;">
+            <div class="small" style="display:flex; justify-content:space-between;"><span>${name}</span><span>${hp} hp${dmg ? ` · +${dmg} schade` : ""}</span></div>
+            <div class="gg-hp-track"><div class="gg-hp-fill" style="width:${pct}%;"></div></div>
+          </div>`;
+        }).join("")}
+      </div>`;
+    }
+    if (gg.gameMode === "teamduels" && payload.teamScore) {
+      return `<div class="card" style="cursor:default; margin-top:10px; text-align:center;">
+        <h3 style="margin-bottom:10px;">⚔️ Teamscore</h3>
+        <div style="display:flex; justify-content:center; gap:24px; font-size:18px; font-weight:700;">
+          <span>Team A: ${payload.teamScore.A || 0}</span><span>Team B: ${payload.teamScore.B || 0}</span>
+        </div>
+      </div>`;
+    }
+    if (gg.gameMode === "br" && payload.eliminatedThisRound?.length) {
+      return `<div class="card" style="cursor:default; margin-top:10px; text-align:center;">
+        <span class="icon">❌</span><h3>Uitgeschakeld</h3>
+        <p>${payload.eliminatedThisRound.join(", ")}</p>
+        <p class="small">Nog over: ${payload.alive.length}</p>
+      </div>`;
+    }
+    return "";
+  })();
+
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Ronde ${gg.round}/${gg.rounds} · resultaten</div></div></div>
@@ -962,6 +1171,7 @@ function drawMpResultsScreen(payload) {
       <span style="font-size:22px;">📍</span>
       <strong style="margin-left:8px;">${payload.answer.countryHint}</strong>
     </div>
+    ${modeExtraHtml}
     <div class="guesslist" style="margin-top:10px;">
       ${sorted.map((g, i) => {
         const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
@@ -1043,16 +1253,40 @@ window.ggMpNextFromHost = function () {
 function onMpGameOver(payload) {
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   gg.scoreboard = payload.scoreboard;
+  if (payload.hp) gg.hp = payload.hp;
+  if (payload.teamScore) gg.teamScore = payload.teamScore;
+  if (payload.alive) gg.alive = new Set(payload.alive);
+  if (payload.eliminated) gg.eliminated = payload.eliminated;
   const sorted = Object.values(payload.scoreboard).sort((a, b) => b.total - a.total);
   const setOptions = Object.entries(LOCATION_SETS)
     .map(([key, s]) => `<option value="${key}" ${key === gg.locationSet ? "selected" : ""}>${s.label}</option>`).join("");
+
+  let winnerText = sorted[0] ? sorted[0].name + " wint!" : "Klaar!";
+  let extraWinnerHtml = "";
+  if (gg.gameMode === "duels" && payload.hp) {
+    const entries = Object.entries(payload.hp);
+    const nameFor = (pid) => gg.scoreboard[pid]?.name || "Speler";
+    if (entries.length === 2) {
+      const [[pidA, hpA], [pidB, hpB]] = entries;
+      winnerText = `${hpA >= hpB ? nameFor(pidA) : nameFor(pidB)} wint het duel!`;
+      extraWinnerHtml = `<p class="small">${nameFor(pidA)}: ${hpA} hp · ${nameFor(pidB)}: ${hpB} hp</p>`;
+    }
+  } else if (gg.gameMode === "teamduels" && payload.teamScore) {
+    const winTeam = (payload.teamScore.A || 0) >= (payload.teamScore.B || 0) ? "A" : "B";
+    winnerText = `Team ${winTeam} wint!`;
+    extraWinnerHtml = `<p class="small">Team A: ${payload.teamScore.A || 0} · Team B: ${payload.teamScore.B || 0}</p>`;
+  } else if (gg.gameMode === "br" && payload.alive) {
+    const aliveNames = payload.alive.map((pid) => gg.scoreboard[pid]?.name).filter(Boolean);
+    if (aliveNames.length === 1) winnerText = `${aliveNames[0]} wint Battle Royale!`;
+  }
 
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>📍 GeoGuesser</h2><div class="desc">Eindresultaat · Lobby ${gg.room.code}</div></div></div>
     <div class="card" style="cursor:default; text-align:center;">
       <span class="icon">🏁</span>
-      <h3>${sorted[0] ? sorted[0].name + " wint!" : "Klaar!"}</h3>
+      <h3>${winnerText}</h3>
+      ${extraWinnerHtml}
     </div>
     <div class="guesslist" style="margin-top:10px;">
       ${sorted.map((s, i) => `<div class="gitem">
@@ -1095,8 +1329,8 @@ window.ggMpRestartGame = function () {
   const locSet = document.getElementById("restartLocationSet")?.value || gg.locationSet;
   const roundTime = readTimerSetting("restart");
   gg.rounds = rounds; gg.locationSet = locSet; gg.roundTime = roundTime; gg.pointFn = buildPointFn(locSet);
-  gg.room.send("restart", { rounds, locationSet: locSet, roundTime });
-  gg.room.send("settings", { rounds, locationSet: locSet, roundTime });
+  gg.room.send("restart", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode });
+  gg.room.send("settings", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode });
   window.ggMpStartGame();
 };
 
@@ -1104,6 +1338,7 @@ function onMpRestart(payload) {
   if (gg.isHost) return;
   gg.rounds = payload.rounds; gg.locationSet = payload.locationSet;
   gg.roundTime = payload.roundTime ?? null;
+  gg.gameMode = payload.gameMode ?? gg.gameMode;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 

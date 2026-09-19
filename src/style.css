@@ -978,3 +978,78 @@ a.linklike {
   font-weight: 700;
   text-decoration: none;
 }
+
+/* ---------- Multiplayer spelmodi: team-indeling (lobby) ---------- */
+.gg-team-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 14px 0;
+}
+.gg-team-col {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 60px;
+}
+.gg-team-col-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+.gg-team-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 999px;
+  padding: 6px 8px 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.gg-team-swap {
+  background: rgba(255,255,255,0.12);
+  border: none;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.gg-team-swap:hover {
+  background: rgba(255,255,255,0.24);
+}
+
+/* ---------- Duels: HP-balken ---------- */
+.gg-hp-track {
+  position: relative;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.12);
+  overflow: hidden;
+}
+.gg-hp-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff5f6d, #ffc371);
+  transition: width 0.4s ease;
+}
