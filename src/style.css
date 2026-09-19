@@ -1216,3 +1216,14 @@ a.linklike {
   border-radius: 999px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }
+
+/* ---------- Solo/streak: "andere locatie" noodknop bij vastzitten ---------- */
+.gg-hud-reroll {
+  cursor: pointer;
+  border: 1px solid rgba(255, 216, 107, 0.4);
+  color: #ffd86b;
+  transition: background 0.15s;
+}
+.gg-hud-reroll:hover {
+  background: rgba(255, 216, 107, 0.15);
+}

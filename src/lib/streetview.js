@@ -36,7 +36,7 @@ function sleep(ms) {
 // Rejects panoramas with no navigable links: those are dead-end/enclosed spots
 // (courtyards, building interiors Google mislabels as outdoor, private
 // driveways, etc.) where the player can't move and has no clues at all.
-export async function findNearbyPanorama(maps, lat, lng, { minLinks = 1 } = {}) {
+export async function findNearbyPanorama(maps, lat, lng, { minLinks = 2 } = {}) {
   const sv = new maps.StreetViewService();
   const radii = [5000, 20000, 50000];
   for (const radius of radii) {

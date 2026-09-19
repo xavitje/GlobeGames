@@ -338,7 +338,7 @@ function drawAutoJoinScreen(code) {
     <div class="gametitle"><div><h2>👥 Lobby joinen</h2><div class="desc">Je bent uitgenodigd voor lobby <strong>${code.toUpperCase()}</strong>.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggAutoJoinName" type="text" placeholder="Bijv. Rafi" maxlength="18"
+      <input id="ggAutoJoinName" type="text" placeholder="Typ je naam..." maxlength="18"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="footerrow">
@@ -461,6 +461,14 @@ function drawFullscreenLoading(roundLabel) {
 
 async function nextSoloRound() {
   gg.round++;
+  await loadAndDrawSoloRound();
+}
+
+// Haal een nieuwe locatie op voor de HUIDIGE ronde (ronde-nummer blijft gelijk).
+// Gebruikt voor zowel "volgende ronde" (na ++) als de "andere locatie"-knop,
+// voor het geval iemand toch nog in een onspeelbare plek (bv. een gebouw
+// zonder uitgang) terechtkomt ondanks het filter op navigeerbare links.
+async function loadAndDrawSoloRound() {
   gg.guess = null;
   gg.submitted = false;
   if (gg.map) { clearGoogleMap(gg.map); gg.map = null; gg.guessMarker = null; }
@@ -495,6 +503,18 @@ async function nextSoloRound() {
   initMap(maps);
   startRoundTimer(120);
 }
+
+// Zit je vast (bv. binnen in een gebouw zonder uitgang, of een technische
+// glitch waarbij lopen/draaien niet meer werkt)? Haal een nieuwe locatie op
+// voor dezelfde ronde, zonder dat dit als een gok telt.
+window.ggRerollRound = function () {
+  if (!gg) return;
+  if ((gg.mode === "solo" || gg.mode === "daily") && !gg.submitted) {
+    loadAndDrawSoloRound();
+  } else if (gg.mode === "streak" && !gg.streakLocked) {
+    nextStreakRound();
+  }
+};
 
 function submitSoloGuess() {
   if (!gg.guess) return;
@@ -657,6 +677,7 @@ function drawStreakRoundScreen() {
       <button class="gg-hud-back-btn" onclick="ggExitToStart()">✕</button>
       <span class="gg-hud-pill">🔥 Streak: ${gg.streak}</span>
       <span class="gg-hud-pill">Beste: ${gg.best}</span>
+      <button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="Zit je vast? Krijg een andere locatie.">🔄 Andere locatie</button>
     </div>
     <div class="gg-streak-panel" id="ggStreakPanel">
       <div class="gg-map-corner-header"><span class="gg-map-guess-info">Welk land is dit?</span></div>
@@ -787,7 +808,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
     <div class="gametitle"><div><h2>➕ Lobby hosten</h2><div class="desc">Stel je lobby in en maak 'm aan.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggNameInput" type="text" placeholder="Bijv. Rafi" maxlength="18" value="${prefill.name || ""}"
+      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || ""}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; margin-top:12px;">
@@ -822,7 +843,7 @@ window.ggShowMpJoin = function (prefill = {}) {
     <div class="gametitle"><div><h2>🔑 Lobby joinen</h2><div class="desc">Vul de code in die je hebt gekregen.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggNameInput" type="text" placeholder="Bijv. Rafi" maxlength="18" value="${prefill.name || ""}"
+      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || ""}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; text-align:center; margin-top:12px;">
@@ -1659,6 +1680,7 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
       <button class="gg-hud-back-btn" onclick="ggExitToStart()">✕</button>
       <span class="gg-hud-pill">${roundLabel}</span>
       <span class="gg-hud-pill gg-hud-score" id="ggHudScore">${scoreLabel}</span>
+      ${gg.mode === "solo" || gg.mode === "daily" ? `<button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="Zit je vast? Krijg een andere locatie.">🔄 Andere locatie</button>` : ""}
     </div>
     <div class="gg-map-corner" id="ggMapCorner" tabindex="0">
       <div class="gg-map-corner-header">
