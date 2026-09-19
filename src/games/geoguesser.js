@@ -1156,7 +1156,10 @@ function ensureChatWidget() {
     </div>`;
   document.body.appendChild(widget);
 
-  document.getElementById("ggChatToggle").onclick = () => toggleChatPanel(true);
+  document.getElementById("ggChatToggle").onclick = () => {
+    const isOpen = document.getElementById("ggChatWidget")?.classList.contains("open");
+    toggleChatPanel(!isOpen);
+  };
   document.getElementById("ggChatClose").onclick = () => toggleChatPanel(false);
   document.getElementById("ggChatForm").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1685,6 +1688,7 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
     <div class="gg-map-corner" id="ggMapCorner" tabindex="0">
       <div class="gg-map-corner-header">
         <span id="ggGuessInfo" class="gg-map-guess-info">Klik op de kaart om te gokken</span>
+        <button class="gg-map-expand-btn" id="ggMapExpandBtn" title="Kaart vergroten/verkleinen">⤢</button>
       </div>
       <div class="gg-map-inner">
         <div id="ggGuessMap" class="gg-guess-map"></div>
@@ -1716,6 +1720,15 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   mapCorner.addEventListener("mouseleave", () => setTimeout(nudgeMapResize, 310));
   mapCorner.addEventListener("focus", () => setTimeout(nudgeMapResize, 310));
   mapCorner.addEventListener("blur", () => setTimeout(nudgeMapResize, 310));
+
+  // Hover/focus-within werkt niet betrouwbaar op touch-schermen, dus een
+  // expliciete tik-knop om de kaart te vergroten/verkleinen (ook handig op
+  // desktop als je niet aan het hoveren wil zitten).
+  document.getElementById("ggMapExpandBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    mapCorner.classList.toggle("gg-expanded");
+    setTimeout(nudgeMapResize, 310);
+  });
 }
 
 async function initPanorama(round) {

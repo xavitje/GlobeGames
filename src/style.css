@@ -734,9 +734,27 @@ code {
               box-shadow 0.3s ease;
 }
 .gg-map-corner:hover,
-.gg-map-corner:focus-within {
+.gg-map-corner:focus-within,
+.gg-map-corner.gg-expanded {
   width: min(960px, 92vw);
   box-shadow: 0 12px 48px rgba(0,0,0,0.7);
+}
+.gg-map-expand-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gg-map-expand-btn:hover {
+  background: rgba(255,255,255,0.18);
 }
 
 .gg-map-corner-header {
@@ -768,7 +786,8 @@ code {
   transition: height 0.3s cubic-bezier(0.4,0,0.2,1);
 }
 .gg-map-corner:hover .gg-guess-map,
-.gg-map-corner:focus-within .gg-guess-map {
+.gg-map-corner:focus-within .gg-guess-map,
+.gg-map-corner.gg-expanded .gg-guess-map {
   height: min(660px, 66vh);
 }
 
@@ -1226,4 +1245,101 @@ a.linklike {
 }
 .gg-hud-reroll:hover {
   background: rgba(255, 216, 107, 0.15);
+}
+
+/* ---------- GeoGuesser: mobiel/touch ---------- */
+@media (max-width: 640px) {
+  .gg-hud-top {
+    flex-wrap: wrap;
+    padding: 10px 10px;
+    gap: 6px;
+  }
+  .gg-hud-back-btn,
+  .gg-hud-pill {
+    font-size: 11.5px;
+    padding: 6px 10px;
+  }
+  .gg-hud-force {
+    margin-left: 0;
+  }
+
+  /* Kaart-hoek: kleiner startformaat, dichter tegen de rand, en de
+     hover-vergroting (werkt niet op touch) wordt vervangen door de
+     expliciete ⤢-knop; uitgeklapt vult 'm bijna het hele scherm. */
+  .gg-map-corner {
+    width: min(230px, calc(100vw - 24px));
+    right: 12px;
+    bottom: 12px;
+  }
+  .gg-map-corner.gg-expanded,
+  .gg-map-corner:focus-within {
+    width: calc(100vw - 24px);
+  }
+  .gg-guess-map {
+    height: 150px;
+  }
+  .gg-map-corner.gg-expanded .gg-guess-map,
+  .gg-map-corner:focus-within .gg-guess-map {
+    height: min(70vh, 520px);
+  }
+  .gg-map-corner-header {
+    padding: 8px 10px 4px;
+  }
+  .gg-map-guess-info {
+    font-size: 11px;
+  }
+  .gg-submit-btn {
+    padding: 13px;
+    font-size: 14px;
+  }
+
+  .gg-streak-panel {
+    width: calc(100vw - 24px);
+    right: 12px;
+    bottom: 12px;
+  }
+
+  /* Chat: kleiner en dichter tegen de rand, zodat 'm niet met de
+     duim-bediening in de weg zit. */
+  .gg-chat-widget {
+    left: 12px;
+    bottom: 12px;
+  }
+  .gg-chat-toggle {
+    width: 46px;
+    height: 46px;
+    font-size: 19px;
+  }
+  .gg-chat-panel {
+    width: calc(100vw - 24px);
+    height: min(50vh, 340px);
+  }
+
+  .gg-code-boxes {
+    gap: 6px;
+  }
+  .gg-code-box {
+    width: 44px;
+    height: 52px;
+    font-size: 22px;
+  }
+
+  .gg-result-footer .btn {
+    width: 100%;
+    min-width: 0;
+  }
+  .gg-result-country {
+    font-size: 19px;
+  }
+
+  .gg-team-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .gg-conn-banner {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    text-align: center;
+  }
 }
