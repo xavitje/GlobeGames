@@ -2424,7 +2424,7 @@ function onMpSabotageReceived(payload) {
       ink.style.backdropFilter = "blur(15px) contrast(0.8) brightness(0.5)";
       ink.style.zIndex = "999";
       ink.style.pointerEvents = "none";
-      ink.innerHTML = \`<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:white; font-size:24px; font-weight:bold; text-align:center; text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Je bent gesaboteerd door \${payload.fromName}! (Inktvlek)</div>\`;
+      ink.innerHTML = `<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:white; font-size:24px; font-weight:bold; text-align:center; text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Je bent gesaboteerd door ${payload.fromName}! (Inktvlek)</div>`;
       wrap.appendChild(ink);
       setTimeout(() => ink.remove(), 5000);
     }
