@@ -398,14 +398,11 @@ function getLobbySession() {
 // ---------- URL helpers ----------
 
 function setLobbyInUrl(code) {
-  history.replaceState(null, "", `#${code ? `geoguesser?lobby=${code.toUpperCase()}` : "geoguesser"}`);
+  history.replaceState(null, "", `${code ? `/geoguesser?lobby=${code.toUpperCase()}` : "/geoguesser"}`);
 }
-function clearLobbyFromUrl() { history.replaceState(null, "", "#geoguesser"); }
+function clearLobbyFromUrl() { history.replaceState(null, "", "/geoguesser"); }
 function getLobbyFromUrl() {
-  const hash = location.hash.replace("#", "");
-  const idx = hash.indexOf("?");
-  if (idx === -1) return null;
-  return new URLSearchParams(hash.slice(idx + 1)).get("lobby") || null;
+  return new URLSearchParams(location.search).get("lobby") || null;
 }
 
 // ---------- Entry point ----------
