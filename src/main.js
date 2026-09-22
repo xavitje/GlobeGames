@@ -9,19 +9,20 @@ import { adSlotHtml, initAdSlots } from "./lib/ads.js";
 
 const app = document.getElementById("app");
 
-function getView() {
-  // Support "/geoguesser" instead of "#geoguesser"
-  const path = location.pathname.replace(/^\/+/, "");
-  const view = path.split("/")[0] || "hub";
-  return view;
+// Echte pad-routing (geen hash meer): "/geoguesser/multiplayer/LFFW" e.d.
+// werkt nu als een normale, deelbare/ververbare URL. Op Vercel zorgt
+// vercel.json ervoor dat elk pad index.html serveert, zodat deze
+// client-side router het daarna overneemt.
+function getPathSegments() {
+  return location.pathname.split("/").filter(Boolean);
 }
 
 function renderRoute() {
-  const view = getView();
+  const [view, ...rest] = getPathSegments();
   if (view === "geohunt") renderGeoHunt(app);
   else if (view === "silhouette") renderSilhouette(app);
   else if (view === "globle") renderGlobleGame(app);
-  else if (view === "geoguesser") renderGeoGuesser(app);
+  else if (view === "geoguesser") renderGeoGuesser(app, rest);
   else {
     app.innerHTML = `
     ${topbar()}
@@ -30,25 +31,25 @@ function renderRoute() {
       <p>Vier manieren om je aardrijkskundekennis te testen: los een landenraster op, herken een land aan zijn vorm, vind het mysterieland op de wereldbol, of raad waar op aarde een straatfoto genomen is.</p>
     </div>
     <div class="cards">
-      <div class="card" onclick="go('/geohunt')">
+      <div class="card" onclick="go('geohunt')">
         <span class="tag">Raster</span>
         ${icon("grid", { size: "lg" })}
         <h3>GeoHunt</h3>
         <p>Vul het 3×3-raster met landen die aan de rij- én kolomcriteria voldoen. Elk land mag maar één keer gebruikt worden — hoe zeldzamer je antwoord, hoe meer punten.</p>
       </div>
-      <div class="card" onclick="go('/silhouette')">
+      <div class="card" onclick="go('silhouette')">
         <span class="tag">Silhouet</span>
         ${icon("chip", { size: "lg" })}
         <h3>Vorm Raden</h3>
         <p>Alleen de omtrek van een land is zichtbaar. Raad welk land het is — elke gok geeft de afstand en richting naar het juiste antwoord.</p>
       </div>
-      <div class="card" onclick="go('/globle')">
+      <div class="card" onclick="go('globle')">
         <span class="tag">Wereldbol</span>
         ${icon("globe", { size: "lg" })}
         <h3>GlobeGuess</h3>
         <p>Raad het mysterieland op de wereldbol. Elke gok kleurt in hoe dichtbij je zit — hoe donkerder, hoe dichter je bij het juiste land bent.</p>
       </div>
-      <div class="card" onclick="go('/geoguesser')">
+      <div class="card" onclick="go('geoguesser')">
         <span class="tag">Straatfoto</span>
         ${icon("pin", { size: "lg" })}
         <h3>GeoGuesser</h3>
@@ -61,35 +62,14 @@ function renderRoute() {
   initAdSlots();
 }
 
-window.go = function (path) {
-  // Update URL without refreshing page
-  window.history.pushState({}, "", path);
+// Navigatie tussen spellen (vanaf de hub of de "Alle spellen"-knop): pusht
+// een nieuwe geschiedenis-entry zodat de terug-knop weer bij de hub uitkomt,
+// net als voorheen met hash-navigatie.
+window.go = function (view) {
+  history.pushState(null, "", view === "hub" ? "/" : `/${view}`);
   renderRoute();
 };
 
 window.addEventListener("popstate", renderRoute);
 renderRoute();
 ensureProfileWidget();
-
-// Anti-cheat: Block inspector / DevTools
-document.addEventListener("contextmenu", (e) => e.preventDefault());
-document.addEventListener("keydown", (e) => {
-  if (
-    e.key === "F12" ||
-    (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) ||
-    (e.ctrlKey && e.key === "U")
-  ) {
-    e.preventDefault();
-  }
-});
-
-// Zorgt ervoor dat de game bevriest als iemand via het Chrome-menu tóch DevTools opent
-setInterval(() => {
-  const before = new Date().getTime();
-  debugger;
-  const after = new Date().getTime();
-  if (after - before > 100) {
-    // DevTools is open
-    document.body.innerHTML = "<h1 style='color:red;text-align:center;margin-top:20%'>Cheating is niet toegestaan! Sluit de developer tools en herlaad de pagina.</h1>";
-  }
-}, 1000);

@@ -210,7 +210,7 @@ function dailyDayNumber() {
 }
 function buildDailyShareText(result) {
   const blocks = result.history.map((h) => (h.pts >= 4500 ? "🟩" : h.pts >= 2500 ? "🟨" : "🟥")).join("");
-  return `GlobeGames Daily #${dailyDayNumber()} — ${result.totalScore}/${result.rounds * 5000} pts\n${blocks}\n${location.origin}${location.pathname}#geoguesser`;
+  return `GlobeGames Daily #${dailyDayNumber()} — ${result.totalScore}/${result.rounds * 5000} pts\n${blocks}\n${location.origin}/geoguesser`;
 }
 
 function scoreForDistance(km) {
@@ -396,18 +396,26 @@ function getLobbySession() {
 }
 
 // ---------- URL helpers ----------
-
+// Elk scherm van GeoGuesser is bereikbaar via een eigen, deelbaar pad:
+// /geoguesser, /geoguesser/singleplayer, /geoguesser/multiplayer, en
+// /geoguesser/multiplayer/<CODE> om direct een lobby te joinen/herverbinden.
+// We gebruiken replaceState (geen pushState) zodat elke klik door de menu's
+// niet de terug-knop van de browser vult met tientallen tussenstappen — de
+// URL volgt gewoon waar je bent, zonder een nieuwe geschiedenis-entry.
+function setUrlPath(path) {
+  history.replaceState(null, "", path);
+}
 function setLobbyInUrl(code) {
-  history.replaceState(null, "", `${code ? `/geoguesser?lobby=${code.toUpperCase()}` : "/geoguesser"}`);
+  setUrlPath(code ? `/geoguesser/multiplayer/${code.toUpperCase()}` : "/geoguesser/multiplayer");
 }
-function clearLobbyFromUrl() { history.replaceState(null, "", "/geoguesser"); }
-function getLobbyFromUrl() {
-  return new URLSearchParams(location.search).get("lobby") || null;
-}
+function clearLobbyFromUrl() { setUrlPath("/geoguesser"); }
 
 // ---------- Entry point ----------
 
-export function renderGeoGuesser(rootEl) {
+// `routeSegments` komt van main.js' router: het deel van het pad na
+// "/geoguesser", bijv. [] voor "/geoguesser", ["singleplayer"], of
+// ["multiplayer", "LFFW"].
+export function renderGeoGuesser(rootEl, routeSegments = []) {
   app = rootEl;
   teardown();
   gg = null;
@@ -429,18 +437,32 @@ export function renderGeoGuesser(rootEl) {
   // By the time a round actually needs it, the library is already warm.
   loadGoogleMaps().catch(() => {});
 
-  const urlLobby = getLobbyFromUrl();
+  // Route: [] -> startscherm, ["singleplayer"] -> direct naar solo-
+  // instellingen, ["multiplayer"] -> multiplayer-menu, ["multiplayer", CODE]
+  // -> direct joinen/herverbinden met die lobby (vervangt de oude
+  // "?lobby="-query, die toch nooit werkte voor gedeelde hash-links).
+  const [section, subCode] = routeSegments;
   const savedLobby = hasMultiplayerConfig() ? getLobbySession() : null;
-  
-  if (urlLobby && hasMultiplayerConfig()) {
-    if (savedLobby && savedLobby.code === urlLobby) {
-      drawReconnectPrompt(savedLobby);
+
+  if (section === "singleplayer") { ggShowSoloSettings(); return; }
+
+  if (section === "multiplayer" && subCode) {
+    const code = subCode.toUpperCase();
+    if (hasMultiplayerConfig()) {
+      if (savedLobby && savedLobby.code === code) drawReconnectPrompt(savedLobby);
+      else drawAutoJoinScreen(code);
     } else {
-      drawAutoJoinScreen(urlLobby);
+      drawStartScreen();
     }
     return;
   }
-  
+
+  if (section === "multiplayer") {
+    if (hasMultiplayerConfig()) ggShowMultiplayerMenu();
+    else drawStartScreen();
+    return;
+  }
+
   if (savedLobby) { drawReconnectPrompt(savedLobby); return; }
   drawStartScreen();
 }
@@ -532,6 +554,7 @@ function drawStartScreen() {
 // ---------- Solo settings ----------
 
 window.ggShowSoloSettings = function (prefill = {}) {
+  setUrlPath("/geoguesser/singleplayer");
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
@@ -974,6 +997,7 @@ function showDailyResult(result) {
 
 // Kiezen tussen zelf hosten of joinen met een code (net als OpenGuessr).
 window.ggShowMultiplayerMenu = function () {
+  setUrlPath("/geoguesser/multiplayer");
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} GeoGuesser multiplayer</h2><div class="desc">Speel dezelfde rondes tegelijk met vrienden.</div></div></div>
@@ -1291,7 +1315,7 @@ function drawLobbyWaiting() {
   const players = gg.room.players();
   const setLabel = locationSetLabel(gg.locationSet);
   const modeLabel = (GAME_MODES[gg.gameMode] || GAME_MODES.ffa).label;
-  const shareUrl = `${location.origin}${location.pathname}#geoguesser?lobby=${gg.room.code}`;
+  const shareUrl = `${location.origin}/geoguesser/multiplayer/${gg.room.code}`;
   const isTeamDuels = gg.gameMode === "teamduels";
   const canStart = checkCanStartGame();
 
