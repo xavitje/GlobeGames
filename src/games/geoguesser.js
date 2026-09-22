@@ -1215,6 +1215,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   room.on("resync", onMpResyncRequest);
   room.on("wager", onMpWagerReceived);
   room.on("scoreupdate", onMpScoreUpdateReceived);
+  room.on("sabotage", onMpSabotageReceived);
 
   room.onConnectionChange((status) => {
     if (status === "disconnected") {
@@ -1557,6 +1558,21 @@ function onMpRoundStart(payload) {
   if (gg.screen === "round" && gg.round === payload.round) return;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
 
+  // Powerups & Sabotages
+  if (payload.round === 1) {
+    const powerups = ["hint", "shield", "5050"];
+    const sabotages = ["fakehint", "ink", "nocompass"];
+    gg.myPowerup = powerups[Math.floor(Math.random() * powerups.length)];
+    gg.mySabotage = sabotages[Math.floor(Math.random() * sabotages.length)];
+    gg.usedPowerup = false;
+    gg.usedSabotage = false;
+  }
+  gg.hasShield = false;
+  document.getElementById("ggSabotageInk")?.remove();
+  if (gg.panorama) {
+    gg.panorama.setOptions({ panControl: !gg.difficulty.includes("nmpz") });
+  }
+
   // Nog niet incasseren/gokken gekozen voor de vorige ronde? Dan schrijf je
   // 'm automatisch veilig bij zodat je niets kwijtraakt door de nieuwe
   // ronde te missen. Sluit ook een eventueel nog open rad-scherm.
@@ -1599,7 +1615,7 @@ function playerScore() {
 function submitMpGuess() {
   if (!gg.guess) return;
   gg.submitted = true;
-  gg.room.send("guess", { round: gg.round, name: gg.name, lat: gg.guess[1], lng: gg.guess[0] });
+  gg.room.send("guess", { round: gg.round, name: gg.name, lat: gg.guess[1], lng: gg.guess[0], shield: gg.hasShield });
   const info = document.getElementById("ggGuessInfo");
   if (info) info.textContent = "Gok verstuurd — wachten op andere spelers...";
   const btn = document.getElementById("ggSubmitBtn");
@@ -1608,7 +1624,7 @@ function submitMpGuess() {
 
 function onMpGuessReceived(payload) {
   if (!gg.isHost || payload.round !== gg.round) return;
-  gg.currentGuesses[payload.from] = { name: payload.name, lat: payload.lat, lng: payload.lng };
+  gg.currentGuesses[payload.from] = { name: payload.name, lat: payload.lat, lng: payload.lng, shield: payload.shield };
   const expected = gg.gameMode === "br"
     ? gg.roundStartPlayers.filter(p => gg.alive.has(p.playerId)).length
     : gg.roundStartPlayers.length;
@@ -1621,7 +1637,8 @@ function hostFinishRound() {
   const answer = { lat: gg.hostAnswer.lat, lng: gg.hostAnswer.lng, countryHint: gg.hostAnswer.countryHint };
   const guesses = Object.entries(gg.currentGuesses).map(([playerId, g]) => {
     const km = haversineKm([g.lng, g.lat], [answer.lng, answer.lat]);
-    const pts = scoreForDistance(km);
+    let pts = scoreForDistance(km);
+    if (g.shield && gg.gameMode !== "duels") pts = Math.min(5000, pts + 1000);
     if (!gg.scoreboard[playerId]) gg.scoreboard[playerId] = { name: g.name, total: 0 };
     // Gokmodus: de ronde-punten gaan pas op het scorebord als de speler zelf
     // kiest om ze veilig te incasseren of te verdubbelen bij het rad (zie
@@ -1639,8 +1656,10 @@ function hostFinishRound() {
   let damage = {};
   if (gg.gameMode === "duels" && guesses.length === 2) {
     const [a, b] = guesses;
-    damage[a.playerId] = Math.max(0, a.pts - b.pts);
-    damage[b.playerId] = Math.max(0, b.pts - a.pts);
+    const aDmg = Math.max(0, a.pts - b.pts);
+    const bDmg = Math.max(0, b.pts - a.pts);
+    damage[a.playerId] = a.shield ? Math.round(aDmg / 2) : aDmg;
+    damage[b.playerId] = b.shield ? Math.round(bDmg / 2) : bDmg;
     gg.hp[b.playerId] = Math.max(0, (gg.hp[b.playerId] ?? 5000) - damage[a.playerId]);
     gg.hp[a.playerId] = Math.max(0, (gg.hp[a.playerId] ?? 5000) - damage[b.playerId]);
     if (gg.hp[a.playerId] <= 0 || gg.hp[b.playerId] <= 0) gg.duelOver = true;
@@ -1977,6 +1996,16 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
       <span class="gg-hud-pill gg-hud-score" id="ggHudScore">${scoreLabel}</span>
       ${gg.mode === "solo" || gg.mode === "daily" ? `<button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="Zit je vast? Krijg een andere locatie.">${icon("refresh", { size: "sm" })} Andere locatie</button>` : ""}
     </div>
+    ${gg.mode === "mp" && gg.myPowerup ? `
+    <div class="gg-hud-left" style="position:absolute; left:20px; top:80px; display:flex; flex-direction:column; gap:10px; z-index:50;">
+      <button id="ggBtnPowerup" class="btn primary" style="opacity:${gg.usedPowerup ? "0.5" : "1"}; box-shadow:0 4px 12px rgba(0,0,0,0.3);" onclick="ggUsePowerup()" ${gg.usedPowerup ? "disabled" : ""}>
+        ${icon("star", { size: "sm" })} Power-up: ${gg.myPowerup}
+      </button>
+      <button id="ggBtnSabotage" class="btn" style="background:#e74c3c; color:white; border:none; opacity:${gg.usedSabotage ? "0.5" : "1"}; box-shadow:0 4px 12px rgba(0,0,0,0.3);" onclick="ggUseSabotageMenu()" ${gg.usedSabotage ? "disabled" : ""}>
+        ${icon("alertTriangle", { size: "sm" })} Sabotage: ${gg.mySabotage}
+      </button>
+    </div>
+    ` : ""}
     <div class="gg-map-corner" id="ggMapCorner" tabindex="0">
       <div class="gg-map-corner-header">
         <span id="ggGuessInfo" class="gg-map-guess-info">Klik op de kaart om te gokken</span>
@@ -2308,6 +2337,104 @@ function ggMpWagerShowResult(won, payout, mult) {
   msg.innerHTML = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
   modal.insertBefore(msg, actions);
   actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager()" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
+}
+
+// ---------- Power-ups & Sabotages ----------
+window.ggUsePowerup = function () {
+  if (gg.usedPowerup) return;
+  gg.usedPowerup = true;
+  document.getElementById("ggBtnPowerup").disabled = true;
+  document.getElementById("ggBtnPowerup").style.opacity = "0.5";
+
+  if (gg.myPowerup === "shield") {
+    gg.hasShield = true;
+    showConnBanner(`${icon("star", { size: "sm" })} Schild geactiveerd! (beschermt deels tegen duel schade of geeft score boost)`);
+    setTimeout(() => hideConnBanner(), 3000);
+  } else if (gg.myPowerup === "hint") {
+    showConnBanner(`💡 Echte Hint: Het is <strong>${gg.current.countryHint}</strong>`);
+    setTimeout(() => hideConnBanner(), 5000);
+  } else if (gg.myPowerup === "5050") {
+    const others = ["Nederland", "België", "Duitsland", "Frankrijk", "Spanje", "Italië", "Verenigde Staten", "Japan", "Brazilië", "Australië", "Zuid-Afrika"];
+    let other = others[Math.floor(Math.random() * others.length)];
+    if (other === gg.current.countryHint) other = "Canada"; // fallback
+    const options = [gg.current.countryHint, other].sort(() => Math.random() - 0.5);
+    showConnBanner(`💡 50/50: Het is <strong>${options[0]}</strong> of <strong>${options[1]}</strong>`);
+    setTimeout(() => hideConnBanner(), 5000);
+  }
+};
+
+window.ggUseSabotageMenu = function () {
+  if (gg.usedSabotage) return;
+  const wrap = document.getElementById("ggFullscreenWrap");
+  if (!wrap) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "gg-wager-overlay";
+  overlay.id = "ggSabotageMenu";
+
+  const alivePlayers = [...gg.alive].filter(id => id !== gg.playerId);
+  if (alivePlayers.length === 0) {
+    alert("Geen tegenstanders over om te saboteren!");
+    return;
+  }
+
+  const listHtml = alivePlayers.map(pid => {
+    const name = gg.scoreboard[pid]?.name || "Speler";
+    return `<button class="btn" style="width:100%; margin-bottom:8px;" onclick="ggSendSabotage('${pid}', '${name}')">${name}</button>`;
+  }).join("");
+
+  overlay.innerHTML = `
+    <div class="gg-roulette-modal">
+      <h3>Kies een doelwit</h3>
+      <p class="small" style="margin-bottom:12px;">Sabotage: ${gg.mySabotage}</p>
+      ${listHtml}
+      <button class="btn" onclick="document.getElementById('ggSabotageMenu').remove()" style="width:100%; margin-top:8px;">Annuleren</button>
+    </div>`;
+  wrap.appendChild(overlay);
+};
+
+window.ggSendSabotage = function (targetId, targetName) {
+  document.getElementById("ggSabotageMenu")?.remove();
+  if (gg.usedSabotage) return;
+  gg.usedSabotage = true;
+  document.getElementById("ggBtnSabotage").disabled = true;
+  document.getElementById("ggBtnSabotage").style.opacity = "0.5";
+
+  gg.room.send("sabotage", { target: targetId, type: gg.mySabotage, fromName: gg.name });
+  showConnBanner(`${icon("alertTriangle", { size: "sm" })} Sabotage '${gg.mySabotage}' ingezet op ${targetName}!`);
+  setTimeout(() => hideConnBanner(), 3000);
+};
+
+function onMpSabotageReceived(payload) {
+  if (payload.target !== gg.playerId) return;
+
+  if (payload.type === "fakehint") {
+    const fakes = ["Verenigde Staten", "Frankrijk", "Rusland", "Brazilië", "India", "Zuid-Afrika", "Mexico", "China"];
+    let fake = fakes[Math.floor(Math.random() * fakes.length)];
+    if (fake === gg.current?.countryHint) fake = "IJsland"; // fallback
+    showConnBanner(`💡 HINT: Het is <strong>${fake}</strong>`);
+    setTimeout(() => hideConnBanner(), 5000);
+  } else if (payload.type === "ink") {
+    const wrap = document.getElementById("ggFullscreenWrap");
+    if (wrap) {
+      const ink = document.createElement("div");
+      ink.id = "ggSabotageInk";
+      ink.style.position = "absolute";
+      ink.style.inset = "0";
+      ink.style.backdropFilter = "blur(15px) contrast(0.8) brightness(0.5)";
+      ink.style.zIndex = "999";
+      ink.style.pointerEvents = "none";
+      ink.innerHTML = \`<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:white; font-size:24px; font-weight:bold; text-align:center; text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Je bent gesaboteerd door \${payload.fromName}! (Inktvlek)</div>\`;
+      wrap.appendChild(ink);
+      setTimeout(() => ink.remove(), 5000);
+    }
+  } else if (payload.type === "nocompass") {
+    if (gg.panorama) {
+      gg.panorama.setOptions({ panControl: false });
+      showConnBanner(`${icon("alertTriangle", { size: "sm" })} \${payload.fromName} heeft je kompas kapot gemaakt voor deze ronde!`);
+      setTimeout(() => hideConnBanner(), 5000);
+    }
+  }
 }
 
 function initMap(mapsApi) {

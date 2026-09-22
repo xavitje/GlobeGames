@@ -36,14 +36,21 @@ function sleep(ms) {
 // Rejects panoramas with no navigable links: those are dead-end/enclosed spots
 // (courtyards, building interiors Google mislabels as outdoor, private
 // driveways, etc.) where the player can't move and has no clues at all.
-export async function findNearbyPanorama(maps, lat, lng, { minLinks = 2 } = {}) {
+export async function findNearbyPanorama(maps, lat, lng, { minLinks = 3 } = {}) {
+  // Voeg een kleine willekeurige offset (jitter) toe zodat we niet exact op
+  // de stad- of gebouwmarker spawnen (verkleint kans op indoor spawns).
+  const jitterLat = (Math.random() - 0.5) * 0.05;
+  const jitterLng = (Math.random() - 0.5) * 0.05;
+  const searchLat = lat + jitterLat;
+  const searchLng = lng + jitterLng;
+
   const sv = new maps.StreetViewService();
   const radii = [5000, 20000, 50000];
   for (const radius of radii) {
     const result = await new Promise((resolve) => {
       sv.getPanorama(
         {
-          location: { lat, lng },
+          location: { lat: searchLat, lng: searchLng },
           radius,
           source: maps.StreetViewSource.OUTDOOR,
         },
@@ -87,7 +94,7 @@ export async function findStreetViewRound(
 }
 
 export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
-  const { noMove = false } = options;
+  const { noMove = false, noPan = false, noZoom = false } = options;
   const panoOptions = {
     pano: pano || undefined,
     pov: { heading: Math.random() * 360, pitch: 0 },
@@ -97,24 +104,28 @@ export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
     motionTracking: false,
     motionTrackingControl: false,
     showRoadLabels: false,
-    // "Niet bewegen"/NMPZ difficulty: hide the walking arrows and disable
-    // click-to-walk, but leave looking around (drag) and zoom intact.
+    // "Niet bewegen" difficulty: hide the walking arrows and disable click-to-walk
     linksControl: !noMove,
     clickToGo: !noMove,
-    panControl: true,
-    zoomControl: true,
-    // Google normally auto zooms in at intersections when walking, which
-    // pulls in extra high-res tiles and is a big part of the "laggy" feel.
-    // Keeping the zoom fixed makes movement noticeably snappier.
+    // "Niet rondkijken" (NMPZ)
+    panControl: !noPan,
+    zoomControl: !noZoom,
+    scrollwheel: !noZoom,
+    disableDoubleClickZoom: noZoom,
     enableCloseUp: false,
   };
-  // `position` is alleen nodig als fallback wanneer er geen pano-id is —
-  // met een pano-id (multiplayer-clients krijgen bewust alleen die, geen
-  // lat/lng, zie geoguesser.js) laadt Google de juiste panorama daar al
-  // rechtstreeks mee op.
+  
+  // position is only needed if there's no pano ID
   if (pano == null && lat != null && lng != null) panoOptions.position = { lat, lng };
   const panorama = new maps.StreetViewPanorama(el, panoOptions);
+  
   if (!noMove) warmNeighboringPanoramas(maps, panorama);
+
+  // Zorg dat je echt niet kunt slepen (pannen) in NMPZ
+  if (noPan) {
+    panorama.setOptions({ gestureHandling: "none" });
+  }
+
   return panorama;
 }
 
