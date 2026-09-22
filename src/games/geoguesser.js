@@ -1995,9 +1995,7 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   const mapCorner = document.getElementById("ggMapCorner");
   const nudgeMapResize = () => {
     if (!gg.map) return;
-    const center = gg.map.getCenter();
     window.google.maps.event.trigger(gg.map, "resize");
-    if (center) gg.map.setCenter(center);
   };
   mapCorner.addEventListener("mouseenter", () => setTimeout(nudgeMapResize, 310));
   mapCorner.addEventListener("mouseleave", () => setTimeout(nudgeMapResize, 310));
