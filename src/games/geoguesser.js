@@ -1257,6 +1257,17 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   saveLobbySession();
   ensureChatWidget();
   drawLobbyWaiting();
+
+  // Een pagina-herlaad (via ggReconnectLobby) maakt hier een gloednieuwe
+  // GameRoom/verbinding aan — dat is niet dezelfde "reconnected"-tak
+  // hierboven in onConnectionChange (die vuurt alleen bij een kortstondig
+  // verbroken/hersteld WebSocket binnen dezelfde pagina, niet bij een echte
+  // refresh). Zonder dit bleef een herverbonden speler altijd op het
+  // lobby-scherm hangen, ook als het spel al bezig was: vraag de host hier
+  // ook expliciet om de huidige rondestatus.
+  if (!isHost && existingPlayerId) {
+    gg.room.send("resync", {});
+  }
 }
 
 function onMpSettingsReceived(payload) {
@@ -1527,6 +1538,7 @@ async function hostAdvanceRound() {
   if (!round) { gg.round--; return hostAdvanceRound(); }
   gg.currentGuesses = {}; gg.finishingRound = false;
   gg.roundStartPlayers = gg.room.players();
+  gg.hostAnswer = round;
   // Zie hierboven: bewust geen lat/lng mee, alleen de pano-id.
   gg.room.send("round", { round: gg.round, total: gg.rounds, pano: round.pano, countryHint: round.countryHint });
 }
@@ -1597,7 +1609,7 @@ function onMpGuessReceived(payload) {
 function hostFinishRound() {
   if (!gg.isHost || gg.finishingRound) return;
   gg.finishingRound = true;
-  const answer = { lat: gg.current.lat, lng: gg.current.lng, countryHint: gg.current.countryHint };
+  const answer = { lat: gg.hostAnswer.lat, lng: gg.hostAnswer.lng, countryHint: gg.hostAnswer.countryHint };
   const guesses = Object.entries(gg.currentGuesses).map(([playerId, g]) => {
     const km = haversineKm([g.lng, g.lat], [answer.lng, answer.lat]);
     const pts = scoreForDistance(km);
