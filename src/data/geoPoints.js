@@ -579,48 +579,48 @@ export const CONTINENT_MAP = {
 // Each set defines which countries are eligible and optionally restricts to only the capital (index 0).
 export const LOCATION_SETS = {
   world: {
-    label: "Hele wereld 🌍",
+    label: "Hele wereld",
     countries: Object.keys(GEO_POINTS),
     onlyCapital: false,
   },
   capitals: {
-    label: "Hoofdsteden 🏛️",
+    label: "Hoofdsteden",
     countries: Object.keys(GEO_POINTS),
     onlyCapital: true,
   },
   bigcities: {
-    label: "Grote steden 🌆",
+    label: "Grote steden",
     // Only countries with more than 1 point
     countries: Object.keys(GEO_POINTS).filter((c) => GEO_POINTS[c].length > 1),
     onlyCapital: false,
   },
   europe: {
-    label: "Europa 🇪🇺",
+    label: "Europa",
     countries: CONTINENT_MAP.europe,
     onlyCapital: false,
   },
   americas: {
-    label: "Amerika's 🌎",
+    label: "Amerika's",
     countries: CONTINENT_MAP.americas,
     onlyCapital: false,
   },
   asia: {
-    label: "Azië 🌏",
+    label: "Azië",
     countries: CONTINENT_MAP.asia,
     onlyCapital: false,
   },
   africa: {
-    label: "Afrika 🌍",
+    label: "Afrika",
     countries: CONTINENT_MAP.africa,
     onlyCapital: false,
   },
   oceania: {
-    label: "Oceanië 🦘",
+    label: "Oceanië",
     countries: CONTINENT_MAP.oceania,
     onlyCapital: false,
   },
   netherlands: {
-    label: "Nederland 🇳🇱",
+    label: "Nederland",
     countries: ["Netherlands"],
     onlyCapital: false,
   },

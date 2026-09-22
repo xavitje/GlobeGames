@@ -46,7 +46,7 @@ function ggCheatToast(symbol) {
   const el = document.createElement("div");
   el.id = "ggCheatToast";
   el.className = "gg-cheat-toast";
-  el.textContent = symbol;
+  el.innerHTML = symbol;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 1000);
 }
@@ -308,7 +308,7 @@ function startRoundTimer(seconds) {
     const pill = document.getElementById("ggHudTimer");
     if (pill) {
       const m = Math.floor(remain / 60), s = remain % 60;
-      pill.textContent = `⏱ ${m}:${String(s).padStart(2, "0")}`;
+      pill.innerHTML = `${icon("clock", { size: "sm" })} ${m}:${String(s).padStart(2, "0")}`;
       pill.classList.toggle("gg-hud-timer-low", remain <= 10);
     }
     if (remain <= 0) { clearRoundTimer(); onRoundTimeUp(); }
@@ -695,7 +695,7 @@ function showSoloResultOverlay(km, pts, opts = {}) {
   overlay.id = "ggResultOverlay";
   overlay.className = "gg-result-overlay";
   const statLine = km == null
-    ? `⏱ Tijd voorbij — geen gok geplaatst · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`
+    ? `${icon("clock", { size: "sm" })} Tijd voorbij — geen gok geplaatst · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`
     : pending
       ? `${icon("ruler", { size: "sm" })} ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> verdiend — nog niet ingecasseerd`
       : `${icon("ruler", { size: "sm" })} ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`;
@@ -958,8 +958,8 @@ function showDailyResult(result) {
   if (copyBtn) {
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(shareText).catch(() => {});
-      copyBtn.textContent = `${icon("check", { size: "sm" })} Gekopieerd!`;
-      setTimeout(() => { copyBtn.textContent = `${icon("clipboard", { size: "sm" })} Kopieer resultaat`; }, 2000);
+      copyBtn.innerHTML = `${icon("check", { size: "sm" })} Gekopieerd!`;
+      setTimeout(() => { copyBtn.innerHTML = `${icon("clipboard", { size: "sm" })} Kopieer resultaat`; }, 2000);
     };
   }
 }
@@ -1324,7 +1324,7 @@ window.ggCopyLink = function () {
   if (!input) return;
   navigator.clipboard.writeText(input.value).catch(() => { input.select(); document.execCommand("copy"); });
   const btn = input.nextElementSibling;
-  if (btn) { btn.textContent = `${icon("check", { size: "sm" })} Gekopieerd!`; setTimeout(() => btn.textContent = `${icon("clipboard", { size: "sm" })} Kopieer`, 2000); }
+  if (btn) { btn.innerHTML = `${icon("check", { size: "sm" })} Gekopieerd!`; setTimeout(() => btn.innerHTML = `${icon("clipboard", { size: "sm" })} Kopieer`, 2000); }
 };
 
 window.ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); clearLobbySession(); drawStartScreen(); };
@@ -1443,7 +1443,7 @@ function showConnBanner(text) {
     banner.className = "gg-conn-banner";
     document.body.appendChild(banner);
   }
-  banner.textContent = text;
+  banner.innerHTML = text;
 }
 
 function hideConnBanner() {
@@ -1551,7 +1551,7 @@ function onMpRoundStart(payload) {
     if (hud) {
       const btn = document.createElement("button");
       btn.className = "gg-hud-pill gg-hud-force";
-      btn.textContent = "⏩ Forceer";
+      btn.innerHTML = `${icon("fastForward", { size: "sm" })} Forceer`;
       btn.onclick = () => hostFinishRound();
       hud.appendChild(btn);
     }
@@ -2133,7 +2133,7 @@ function ggWagerShowResult(won, payout, mult) {
   const msg = document.createElement("p");
   msg.className = won ? "msg good" : "msg bad";
   msg.style.textAlign = "center";
-  msg.textContent = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
+  msg.innerHTML = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
   modal.insertBefore(msg, actions);
   actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager(); ggResolveWager();" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
 }
@@ -2277,7 +2277,7 @@ function ggMpWagerShowResult(won, payout, mult) {
   const msg = document.createElement("p");
   msg.className = won ? "msg good" : "msg bad";
   msg.style.textAlign = "center";
-  msg.textContent = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
+  msg.innerHTML = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
   modal.insertBefore(msg, actions);
   actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager()" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
 }
@@ -2322,7 +2322,7 @@ function initMap(mapsApi) {
     });
 
     const info = document.getElementById("ggGuessInfo");
-    if (info) info.textContent = `Gok geplaatst ${icon("check", { size: "sm" })}`;
+    if (info) info.innerHTML = `Gok geplaatst ${icon("check", { size: "sm" })}`;
     const btn = document.getElementById("ggSubmitBtn");
     if (btn) btn.removeAttribute("disabled");
   });

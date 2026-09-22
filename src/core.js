@@ -43,6 +43,8 @@ const ICONS = {
   dice: '<rect x="4" y="4" width="16" height="16" rx="3.6"/><circle cx="8.3" cy="8.3" r="1.1"/><circle cx="15.7" cy="8.3" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="8.3" cy="15.7" r="1.1"/><circle cx="15.7" cy="15.7" r="1.1"/>',
   swap: '<path d="M4 8h13"/><polyline points="13 4 17 8 13 12"/><path d="M20 16H7"/><polyline points="11 12 7 16 11 20"/>',
   send: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>',
+  fastForward: '<polyline points="4 6 11 12 4 18"/><polyline points="12 6 19 12 12 18"/>',
 };
 
 export function icon(name, opts = {}) {
