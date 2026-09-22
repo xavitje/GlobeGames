@@ -1,5 +1,5 @@
 import { GEO_POINTS, LOCATION_SETS } from "../data/geoPoints.js";
-import { ALL_NAMES, haversineKm, topbar, attachAutocomplete, candidateNames, findCountryByLoose, compassArrow } from "../core.js";
+import { ALL_NAMES, haversineKm, topbar, attachAutocomplete, candidateNames, findCountryByLoose } from "../core.js";
 import {
   hasGoogleMapsKey,
   loadGoogleMaps,
@@ -20,8 +20,10 @@ let gg = null;
 
 // ---------- Geheime hint (alleen voor mij) ----------
 // Typ dit woord ergens tijdens een ronde (het maakt niet uit waar de focus
-// staat) om een piepklein, bijna onzichtbaar antwoordje in de hoek aan/uit
-// te zetten. Niemand anders komt hier per ongeluk achter.
+// staat) om een klein antwoordje in de hoek aan/uit te zetten. Niemand
+// anders komt hier per ongeluk achter — de knop bestaat nergens in de UI.
+// Listener staat op de capture-fase van window, zodat ook een handler die
+// ergens anders stopPropagation() aanroept 'm niet kan blokkeren.
 const GG_CHEAT_WORD = "xyzzy";
 let ggCheatBuffer = "";
 let ggCheatOn = false;
@@ -32,8 +34,23 @@ window.addEventListener("keydown", (e) => {
     ggCheatOn = !ggCheatOn;
     ggCheatBuffer = "";
     updateCheatHint();
+    ggCheatToast(ggCheatOn ? "🔓" : "🔒");
   }
-});
+}, true);
+
+// Piepklein bevestigingsvinkje rechtsboven zodra je het woord typt, zodat je
+// weet dat het geschakeld is zelfs als je de hint zelf niet meteen ziet
+// (bv. omdat er nog geen ronde loopt). Verdwijnt vanzelf na een seconde.
+function ggCheatToast(symbol) {
+  document.getElementById("ggCheatToast")?.remove();
+  const el = document.createElement("div");
+  el.id = "ggCheatToast";
+  el.className = "gg-cheat-toast";
+  el.textContent = symbol;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1000);
+}
+
 function updateCheatHint() {
   const wrap = document.getElementById("ggFullscreenWrap");
   document.getElementById("ggCheatHint")?.remove();
@@ -493,7 +510,7 @@ window.ggShowSoloSettings = function (prefill = {}) {
         <button class="gg-pill-btn${(prefill.difficulty || "free") === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
         <button class="gg-pill-btn${prefill.difficulty === "nomove" ? " active" : ""}" data-v="nomove">Niet bewegen</button>
         <button class="gg-pill-btn${prefill.difficulty === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
-        <button class="gg-pill-btn${prefill.difficulty === "gamble" ? " active" : ""}" data-v="gamble">🎰 Gokken</button>
+        <button class="gg-pill-btn${prefill.difficulty === "gamble" ? " active" : ""}" data-v="gamble" title="Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.">🎰 Gokken</button>
       </div>
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
         <input type="checkbox" id="soloBlackWhite" ${prefill.blackwhite ? "checked" : ""} /> Zwart-wit
@@ -529,7 +546,8 @@ window.ggStartSolo = function () {
   const blackwhite = !!document.getElementById("soloBlackWhite")?.checked;
   gg = { mode: "solo", round: 0, totalScore: 0, rounds, locationSet: locSet, difficulty, blackwhite,
     pointFn: buildPointFn(locSet), usedPanos: new Set(), history: [],
-    current: null, guess: null, map: null, guessMarker: null, resultMap: null, panorama: null };
+    current: null, guess: null, map: null, guessMarker: null, resultMap: null, panorama: null,
+    pendingPts: null, pendingKm: null, gambleStats: { rounds: 0, staked: 0, won: 0 } };
   nextSoloRound();
 };
 
@@ -616,12 +634,23 @@ function submitSoloGuess() {
   gg.submitted = true;
   const km = haversineKm(gg.guess, [gg.current.lng, gg.current.lat]);
   const pts = scoreForDistance(km);
-  gg.totalScore += pts;
-  gg.history.push({ km, pts, country: gg.current.countryHint });
-  showSoloResultOverlay(km, pts);
+  // Gokmodus: de punten van deze ronde worden pas bijgeschreven nadat je
+  // kiest om ze veilig te incasseren of te verdubbelen bij het rad — zie
+  // ggBankPoints()/ggOpenWager() hieronder. Bij 0 punten valt er niets te
+  // wagen, dus dan telt de ronde meteen mee zoals normaal.
+  if (gg.difficulty === "gamble" && pts > 0) {
+    gg.pendingPts = pts;
+    gg.pendingKm = km;
+    showSoloResultOverlay(km, pts, { pending: true });
+  } else {
+    gg.totalScore += pts;
+    gg.history.push({ km, pts, country: gg.current.countryHint });
+    showSoloResultOverlay(km, pts);
+  }
 }
 
-function showSoloResultOverlay(km, pts) {
+function showSoloResultOverlay(km, pts, opts = {}) {
+  const pending = !!opts.pending;
   const corner = document.getElementById("ggMapCorner");
   if (corner) corner.style.display = "none";
   if (gg.map) { clearGoogleMap(gg.map); gg.map = null; gg.guessMarker = null; }
@@ -634,16 +663,26 @@ function showSoloResultOverlay(km, pts) {
   overlay.className = "gg-result-overlay";
   const statLine = km == null
     ? `⏱ Tijd voorbij — geen gok geplaatst · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`
-    : `📏 ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`;
+    : pending
+      ? `📏 ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> verdiend — nog niet ingecasseerd`
+      : `📏 ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`;
   overlay.innerHTML = `
     <div class="gg-result-header">
       <div class="gg-result-country">${gg.current.countryHint}</div>
       <div class="gg-result-stat">${statLine}</div>
     </div>
     <div id="ggResultMap" class="gg-result-map"></div>
+    ${pending ? `
+    <div class="gg-wager-panel" id="ggWagerPanel">
+      <p class="small">🎰 Gokmodus: incasseer je ${pts} pts veilig, of waag ze bij het rad voor een kans op meer — of alles kwijt.</p>
+      <div class="gg-wager-actions">
+        <button class="btn" onclick="ggBankPoints()">✅ Veilig incasseren (+${pts})</button>
+        <button class="btn primary" onclick="ggOpenWager()">🎰 Waag ze bij het rad</button>
+      </div>
+    </div>` : ""}
     ${adSlotHtml("geoguesserResults")}
     <div class="gg-result-footer">
-      <button class="btn primary" id="ggNextRoundBtn">
+      <button class="btn primary" id="ggNextRoundBtn" style="${pending ? "display:none;" : ""}">
         ${gg.round < gg.rounds ? "Volgende ronde →" : "Bekijk eindscore"}
       </button>
     </div>`;
@@ -706,11 +745,17 @@ function showSoloFinalScore() {
     </div>
     <div class="guesslist" style="margin-top:14px;">
       ${gg.history.map((h, i) => `<div class="gitem">
-        <div class="name">Ronde ${i+1} · ${h.country}</div>
-        <div class="dist">${Math.round(h.km).toLocaleString()} km</div>
+        <div class="name">Ronde ${i+1} · ${h.country}${h.gambled ? (h.gambleWon ? " 🎰✅" : " 🎰❌") : ""}</div>
+        <div class="dist">${h.km == null ? "—" : Math.round(h.km).toLocaleString() + " km"}</div>
         <div></div><div class="prox">${h.pts} pts</div>
       </div>`).join("")}
     </div>
+    ${gg.gambleStats?.rounds > 0 ? `
+    <div class="card" style="cursor:default; text-align:center; margin-top:12px;">
+      <span class="icon">🎰</span>
+      <h3>${gg.gambleStats.rounds} keer gegokt</h3>
+      <p>${gg.gambleStats.staked} pts ingezet, ${gg.gambleStats.won} pts uitbetaald.</p>
+    </div>` : ""}
     ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
       <button class="btn" onclick="ggShowStart()">← Menu</button>
@@ -1855,7 +1900,7 @@ async function initPanorama(round) {
   const maps = await loadGoogleMaps();
   const el = document.getElementById("ggStreetView");
   if (!el) return;
-  const noMove = gg.difficulty === "nomove" || gg.difficulty === "nmpz" || gg.difficulty === "gamble";
+  const noMove = gg.difficulty === "nomove" || gg.difficulty === "nmpz";
   gg.panorama = createPanorama(maps, el, round, { noMove });
   el.classList.toggle("gg-grayscale", !!gg.blackwhite);
 
@@ -1880,11 +1925,14 @@ async function initPanorama(round) {
   // Safety net in case neither event fires for some reason.
   setTimeout(hideLoading, 4000);
 
-  if (gg.difficulty === "gamble") initGambleNav(maps);
   updateCheatHint();
 }
 
-// ---------- Gokmodus: eerst een potje roulette winnen om te mogen bewegen ----------
+// ---------- Gokmodus: waag je rondepunten bij het rad ----------
+// Bewegen/rondkijken is in deze modus helemaal vrij — het gokaspect zit 'm
+// puur in de score: na elke ronde mag je je verdiende punten veilig
+// incasseren, of ze wagen bij een roulette-rad voor een kans op meer
+// (rood/zwart = x2, groen = x5, mis = die ronde 0 punten).
 
 const ROULETTE_RED = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
 function rouletteColor(n) {
@@ -1892,52 +1940,38 @@ function rouletteColor(n) {
   return ROULETTE_RED.has(n) ? "red" : "black";
 }
 
-let ggGambleLinksListener = null;
+window.ggBankPoints = function () {
+  if (gg.pendingPts == null) return;
+  gg.totalScore += gg.pendingPts;
+  gg.history.push({ km: gg.pendingKm, pts: gg.pendingPts, country: gg.current.countryHint });
+  gg.pendingPts = null;
+  gg.pendingKm = null;
+  ggResolveWager();
+};
 
-function initGambleNav(maps) {
-  renderGambleNav(gg.panorama.getLinks() || []);
-  if (ggGambleLinksListener) maps.event.removeListener(ggGambleLinksListener);
-  ggGambleLinksListener = maps.event.addListener(gg.panorama, "links_changed", () => {
-    renderGambleNav(gg.panorama.getLinks() || []);
-  });
-}
-
-function renderGambleNav(links) {
+window.ggOpenWager = function () {
   const wrap = document.getElementById("ggFullscreenWrap");
-  if (!wrap) return;
-  document.getElementById("ggGambleNav")?.remove();
-  const nav = document.createElement("div");
-  nav.id = "ggGambleNav";
-  nav.className = "gg-gamble-nav";
-  const usable = (links || []).filter((l) => l && l.pano);
-  nav.innerHTML = usable.length
-    ? usable.map((l) => `<button class="gg-gamble-nav-btn" onclick="ggGambleTryMove('${l.pano}')">${compassArrow(l.heading || 0)} Gok om te lopen</button>`).join("")
-    : `<span class="gg-gamble-nav-empty">Geen richting om heen te gaan vanaf hier.</span>`;
-  wrap.appendChild(nav);
-}
-
-window.ggGambleTryMove = function (pano) {
-  const wrap = document.getElementById("ggFullscreenWrap");
-  if (!wrap || document.getElementById("ggRouletteOverlay")) return;
+  if (!wrap || gg.pendingPts == null || document.getElementById("ggWagerOverlay")) return;
+  const pts = gg.pendingPts;
   const overlay = document.createElement("div");
-  overlay.id = "ggRouletteOverlay";
+  overlay.id = "ggWagerOverlay";
   overlay.className = "gg-roulette-overlay";
   overlay.innerHTML = `
     <div class="gg-roulette-modal">
-      <h3>🎰 Gokken om te bewegen</h3>
-      <p class="small">Kies rood of zwart. Win je, dan mag je die kant op lopen.</p>
-      <div class="gg-roulette-number" id="ggRouletteNumber">?</div>
-      <div class="gg-roulette-colors" id="ggRouletteColors">
-        <button class="gg-roulette-color-btn gg-roulette-red" data-c="red">Rood</button>
-        <button class="gg-roulette-color-btn gg-roulette-black" data-c="black">Zwart</button>
+      <h3>🎰 Waag je ${pts} pts</h3>
+      <p class="small">Rood of zwart geraden = ×2. Groen (0) geraden = ×5, maar kleine kans. Mis = deze ronde 0 pts.</p>
+      <div class="gg-roulette-number" id="ggWagerNumber">?</div>
+      <div class="gg-roulette-colors" id="ggWagerColors">
+        <button class="gg-roulette-color-btn gg-roulette-red" data-c="red">Rood ×2</button>
+        <button class="gg-roulette-color-btn gg-roulette-black" data-c="black">Zwart ×2</button>
+        <button class="gg-roulette-color-btn gg-roulette-green" data-c="green">Groen ×5</button>
       </div>
-      <div class="gg-roulette-actions" id="ggRouletteActions">
-        <button class="btn" onclick="ggRouletteClose()">Annuleren</button>
-        <button class="btn primary" id="ggRouletteSpinBtn" disabled>🎡 Draai</button>
+      <div class="gg-roulette-actions" id="ggWagerActions">
+        <button class="btn" onclick="ggCancelWager()">Terug</button>
+        <button class="btn primary" id="ggWagerSpinBtn" disabled>🎡 Draai</button>
       </div>
     </div>`;
   wrap.appendChild(overlay);
-  overlay.dataset.pano = pano;
 
   let chosen = null;
   overlay.querySelectorAll(".gg-roulette-color-btn").forEach((btn) => {
@@ -1945,21 +1979,28 @@ window.ggGambleTryMove = function (pano) {
       overlay.querySelectorAll(".gg-roulette-color-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       chosen = btn.dataset.c;
-      document.getElementById("ggRouletteSpinBtn").disabled = false;
+      document.getElementById("ggWagerSpinBtn").disabled = false;
     });
   });
-  document.getElementById("ggRouletteSpinBtn").addEventListener("click", () => {
+  document.getElementById("ggWagerSpinBtn").addEventListener("click", () => {
     if (!chosen) return;
-    ggRouletteSpin(chosen);
+    ggWagerSpin(chosen);
   });
 };
 
-function ggRouletteSpin(chosen) {
-  const overlay = document.getElementById("ggRouletteOverlay");
+window.ggCancelWager = function () {
+  document.getElementById("ggWagerOverlay")?.remove();
+};
+
+function ggWagerSpin(chosen) {
+  const overlay = document.getElementById("ggWagerOverlay");
   if (!overlay) return;
-  const numberEl = document.getElementById("ggRouletteNumber");
-  document.getElementById("ggRouletteColors").querySelectorAll("button").forEach((b) => b.disabled = true);
-  document.getElementById("ggRouletteSpinBtn").disabled = true;
+  const numberEl = document.getElementById("ggWagerNumber");
+  overlay.querySelectorAll("button").forEach((b) => b.disabled = true);
+
+  const pts = gg.pendingPts;
+  gg.gambleStats.rounds++;
+  gg.gambleStats.staked += pts;
 
   let ticks = 0;
   const spinTimer = setInterval(() => {
@@ -1974,35 +2015,38 @@ function ggRouletteSpin(chosen) {
       numberEl.textContent = finalN;
       numberEl.className = `gg-roulette-number gg-roulette-${finalColor}`;
       const won = finalColor === chosen;
-      ggRouletteShowResult(won, overlay.dataset.pano);
+      const mult = chosen === "green" ? 5 : 2;
+      const payout = won ? pts * mult : 0;
+      gg.gambleStats.won += payout;
+      gg.totalScore += payout;
+      gg.history.push({ km: gg.pendingKm, pts: payout, country: gg.current.countryHint, gambled: true, gambleWon: won });
+      gg.pendingPts = null;
+      gg.pendingKm = null;
+      ggWagerShowResult(won, payout, mult);
     }
   }, 80);
 }
 
-function ggRouletteShowResult(won, pano) {
-  const overlay = document.getElementById("ggRouletteOverlay");
+function ggWagerShowResult(won, payout, mult) {
+  const overlay = document.getElementById("ggWagerOverlay");
   if (!overlay) return;
-  const actions = document.getElementById("ggRouletteActions");
+  const actions = document.getElementById("ggWagerActions");
   const modal = overlay.querySelector(".gg-roulette-modal");
   const msg = document.createElement("p");
   msg.className = won ? "msg good" : "msg bad";
   msg.style.textAlign = "center";
-  msg.textContent = won ? "🎉 Gewonnen! Je mag lopen." : "😢 Helaas, deze keer niet.";
+  msg.textContent = won ? `🎉 Geraakt (×${mult})! +${payout} pts` : "😢 Mis — deze ronde 0 pts.";
   modal.insertBefore(msg, actions);
-  actions.innerHTML = won
-    ? `<button class="btn primary" onclick="ggRouletteClose()" style="width:100%;">Verder lopen →</button>`
-    : `<button class="btn" onclick="ggRouletteClose()">Sluiten</button><button class="btn primary" onclick="ggRouletteClose(); ggGambleTryMove('${pano}')">🔄 Nog een keer gokken</button>`;
-  if (won) {
-    setTimeout(() => {
-      document.getElementById("ggRouletteOverlay")?.remove();
-      if (gg?.panorama) gg.panorama.setPano(pano);
-    }, 900);
-  }
+  actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager(); ggResolveWager();" style="width:100%;">Verder →</button>`;
 }
 
-window.ggRouletteClose = function () {
-  document.getElementById("ggRouletteOverlay")?.remove();
-};
+function ggResolveWager() {
+  document.getElementById("ggWagerPanel")?.remove();
+  const stat = document.querySelector("#ggResultOverlay .gg-result-stat");
+  if (stat) stat.innerHTML = `Totaal: ${gg.totalScore} pts`;
+  const nextBtn = document.getElementById("ggNextRoundBtn");
+  if (nextBtn) nextBtn.style.display = "";
+}
 
 function initMap(mapsApi) {
   const container = document.getElementById("ggGuessMap");
