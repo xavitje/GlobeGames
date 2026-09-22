@@ -2040,13 +2040,17 @@ function ggWagerShowResult(won, payout, mult) {
   actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager(); ggResolveWager();" style="width:100%;">Verder →</button>`;
 }
 
-function ggResolveWager() {
+// Let op: wordt ook aangeroepen vanuit een inline onclick-attribuut (de
+// "Verder →"-knop hierboven), dat in de globale scope draait, niet in de
+// scope van deze module — daarom moet dit een window-functie zijn, anders
+// gooit de browser een stille ReferenceError en blijft het gokpaneel hangen.
+window.ggResolveWager = function () {
   document.getElementById("ggWagerPanel")?.remove();
   const stat = document.querySelector("#ggResultOverlay .gg-result-stat");
   if (stat) stat.innerHTML = `Totaal: ${gg.totalScore} pts`;
   const nextBtn = document.getElementById("ggNextRoundBtn");
   if (nextBtn) nextBtn.style.display = "";
-}
+};
 
 function initMap(mapsApi) {
   const container = document.getElementById("ggGuessMap");

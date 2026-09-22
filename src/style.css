@@ -1585,16 +1585,21 @@ a.linklike {
 /* Klein, discreet antwoordje — zie GG_CHEAT_WORD. Leesbaar als je het zoekt,
    maar te klein/onopvallend om per ongeluk op te vallen. */
 .gg-cheat-hint {
+  /* Niet onderin plaatsen: daar zit Street View's eigen grote "Google"-
+     watermerk, waar tekst in opgaat/onleesbaar tegen wordt. Linksboven,
+     onder de HUD-balk, is altijd leeg en de panorama zelf staat daar nooit
+     iets overheen. */
   position: absolute;
-  bottom: 6px;
-  left: 8px;
+  top: 56px;
+  left: 10px;
   z-index: 999;
-  font-size: 11px;
+  font-size: 11.5px;
   font-family: ui-monospace, monospace;
-  color: rgba(255,255,255,0.45);
-  background: rgba(0,0,0,0.35);
-  padding: 2px 6px;
-  border-radius: 5px;
+  color: #fff;
+  background: rgba(0,0,0,0.7);
+  border: 1px solid rgba(255,255,255,0.25);
+  padding: 3px 8px;
+  border-radius: 6px;
   pointer-events: none;
   user-select: none;
 }
