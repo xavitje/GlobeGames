@@ -4,6 +4,7 @@ import { renderGeoHunt } from "./games/geohunt.js";
 import { renderSilhouette } from "./games/silhouette.js";
 import { renderGlobleGame } from "./games/globle.js";
 import { renderGeoGuesser } from "./games/geoguesser.js";
+import { renderWikiSpeedrun } from "./games/wikispeedrun.js";
 import { ensureProfileWidget } from "./lib/profile.js";
 import { adSlotHtml, initAdSlots } from "./lib/ads.js";
 
@@ -23,6 +24,7 @@ function renderRoute() {
   else if (view === "silhouette") renderSilhouette(app);
   else if (view === "globle") renderGlobleGame(app);
   else if (view === "geoguesser") renderGeoGuesser(app, rest);
+  else if (view === "wikispeedrun") renderWikiSpeedrun(app);
   else {
     app.innerHTML = `
     ${topbar()}
@@ -54,6 +56,12 @@ function renderRoute() {
         ${icon("pin", { size: "lg" })}
         <h3>GeoGuesser</h3>
         <p>Een echte straatfoto verschijnt — plaats je pin op de kaart en zie hoe dichtbij je zat. 5 rondes, net als het origineel.</p>
+      </div>
+      <div class="card" onclick="go('wikispeedrun')">
+        <span class="tag">Lezen</span>
+        ${icon("bookOpen", { size: "lg" })}
+        <h3>WikiSpeedrun</h3>
+        <p>Race van het startartikel naar het eindartikel. Navigeer enkel door op links te klikken, in zo min mogelijk clicks!</p>
       </div>
     </div>
     ${adSlotHtml("hubFooter")}

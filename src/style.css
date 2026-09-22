@@ -1683,3 +1683,81 @@ a.linklike {
   pointer-events: none;
   user-select: none;
 }
+
+/* --- Wikipedia Speedrun --- */
+.wiki-content {
+  font-family: sans-serif;
+  line-height: 1.6;
+  font-size: 15px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.wiki-title {
+  border-bottom: 1px solid #a2a9b1;
+  margin-bottom: 0.25em;
+  padding-bottom: 0;
+  font-family: "Linux Libertine", "Georgia", "Times", serif;
+  font-size: 2em;
+  font-weight: normal;
+}
+.wiki-body h2 {
+  border-bottom: 1px solid #a2a9b1;
+  font-family: "Linux Libertine", "Georgia", "Times", serif;
+  margin-top: 1em;
+  margin-bottom: 0.25em;
+}
+.wiki-body h3 {
+  font-size: 1.2em;
+  margin-top: 0.3em;
+  margin-bottom: 0;
+}
+.wiki-body p {
+  margin: 0.5em 0;
+}
+.wiki-body ul, .wiki-body ol {
+  margin: 0.3em 0 0 1.6em;
+  padding: 0;
+}
+.wiki-body a {
+  text-decoration: none;
+  color: #0645ad;
+}
+.wiki-body a:hover {
+  text-decoration: underline;
+}
+.wiki-body img {
+  max-width: 100%;
+  height: auto;
+}
+.wiki-body .thumb {
+  margin-bottom: 0.5em;
+  border: 1px solid #c8ccd1;
+  background-color: #f8f9fa;
+  padding: 3px;
+}
+.wiki-body .thumbcaption {
+  font-size: 94%;
+  padding: 3px;
+}
+
+.gg-autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: var(--shadow);
+  display: none;
+}
+.gg-autocomplete-item {
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.gg-autocomplete-item:hover {
+  background: var(--panel2);
+}
