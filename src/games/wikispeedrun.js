@@ -1,10 +1,12 @@
 import { topbar, icon } from "../core.js";
 import { hasMultiplayerConfig, GameRoom, randomRoomCode, randomPlayerId } from "../lib/multiplayer.js";
+import { getProfile, saveProfile } from "../lib/profile.js";
 
 let app;
 let ws = null; // WikiSpeedrun state
+let syncTimer = null;
 
-// --- API Helpers ---
+// ---------- Wikipedia API ----------
 
 async function fetchWikiRandom() {
   const url = `https://nl.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=1&format=json&origin=*`;
@@ -15,10 +17,10 @@ async function fetchWikiRandom() {
 
 async function fetchWikiSearch(query) {
   if (!query) return [];
-  const url = `https://nl.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=5&namespace=0&format=json&origin=*`;
+  const url = `https://nl.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=6&namespace=0&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
-  return data[1]; // Array of titles
+  return data[1] || [];
 }
 
 async function fetchWikiPage(title) {
@@ -29,12 +31,27 @@ async function fetchWikiPage(title) {
   return { title: data.parse.title, html: data.parse.text["*"] };
 }
 
-// --- Autocomplete Logic ---
+// ---------- Klein toastje (herbruikt dezelfde stijl als de cheat-toast) ----------
 
-function attachWikiAutocomplete(inputId) {
+function wsToast(text) {
+  document.getElementById("wsToast")?.remove();
+  const el = document.createElement("div");
+  el.id = "wsToast";
+  el.className = "gg-cheat-toast";
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+
+// ---------- Autocomplete ----------
+// `onChange` vuurt bij ELKE geldige invoer (niet alleen bij het kiezen uit de
+// lijst) — dat was de kern van een bug waarbij een getypte titel die nooit uit
+// de dropdown werd aangeklikt onzichtbaar bleef voor de host-sync en de
+// start-knop.
+function attachWikiAutocomplete(inputId, onChange) {
   const input = document.getElementById(inputId);
   if (!input) return;
-  
+
   let dropdown = document.getElementById(inputId + "Dropdown");
   if (!dropdown) {
     dropdown = document.createElement("div");
@@ -42,239 +59,423 @@ function attachWikiAutocomplete(inputId) {
     dropdown.className = "gg-autocomplete-dropdown";
     input.parentNode.appendChild(dropdown);
   }
-  
+
   let timeout;
   input.addEventListener("input", () => {
     clearTimeout(timeout);
-    dropdown.innerHTML = "";
-    dropdown.style.display = "none";
-    
+    onChange(input.value.trim());
+
     const val = input.value.trim();
     if (val.length < 2) {
-      if (ws.isHost) syncSettings(); // sync typed text
+      dropdown.style.display = "none";
+      dropdown.innerHTML = "";
       return;
     }
-    
+
     timeout = setTimeout(async () => {
       try {
         const matches = await fetchWikiSearch(val);
-        if (matches.length > 0) {
-          dropdown.innerHTML = matches.map(m => `<div class="gg-autocomplete-item">${m}</div>`).join("");
-          dropdown.style.display = "block";
-          
-          dropdown.querySelectorAll(".gg-autocomplete-item").forEach(item => {
-            item.addEventListener("mousedown", (e) => {
-              e.preventDefault();
-              input.value = item.textContent;
-              dropdown.style.display = "none";
-              if (ws.isHost) syncSettings();
-            });
-          });
+        if (!matches.length) {
+          dropdown.style.display = "none";
+          return;
         }
+        dropdown.innerHTML = matches.map((m) => `<div class="gg-autocomplete-item">${m}</div>`).join("");
+        dropdown.style.display = "block";
+        dropdown.querySelectorAll(".gg-autocomplete-item").forEach((item) => {
+          item.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            input.value = item.textContent;
+            dropdown.style.display = "none";
+            onChange(input.value);
+          });
+        });
       } catch (e) {
         console.error("Autocomplete fetch error", e);
       }
     }, 300);
   });
-  
+
   input.addEventListener("blur", () => {
-    setTimeout(() => { if (dropdown) dropdown.style.display = "none"; }, 150);
+    setTimeout(() => { dropdown.style.display = "none"; }, 150);
   });
 }
 
-// --- Lobby Logic ---
+// ---------- URL-routing ----------
+// Zelfde patroon als GeoGuesser: "/wikispeedrun" is het menu, en
+// "/wikispeedrun/<CODE>" joint direct een lobby als je een gedeelde link
+// opent — een echte, deelbare/ververbare URL i.p.v. de oude "?lobby="-query.
+function setUrlPath(path) {
+  history.replaceState(null, "", path);
+}
+function setLobbyInUrl(code) {
+  setUrlPath(code ? `/wikispeedrun/${code.toUpperCase()}` : "/wikispeedrun");
+}
+function clearLobbyFromUrl() { setUrlPath("/wikispeedrun"); }
 
-export function renderWikiSpeedrun(container) {
+// ---------- Opruimen ----------
+// Zonder dit blijft, als je tijdens een run wegnavigeert (bv. via de "Alle
+// spellen"-knop of de browser-terugknop), de Ctrl+F-blokkade voor altijd
+// actief op de rest van de site, blijft de klok-interval doortikken en blijft
+// de multiplayer-verbinding openstaan.
+function teardown() {
+  if (ws?.room) { try { ws.room.leave(); } catch (e) {} }
+  if (ws?.cleanupCheat) ws.cleanupCheat();
+  if (ws?.timerInt) clearInterval(ws.timerInt);
+  clearTimeout(syncTimer);
+  window.removeEventListener("popstate", handleExternalNavigate);
+}
+function handleExternalNavigate() {
+  if (!location.pathname.startsWith("/wikispeedrun")) teardown();
+}
+
+// ---------- Entry point ----------
+
+export function renderWikiSpeedrun(container, routeSegments = []) {
   app = container;
-  
-  if (ws && ws.room) ws.room.leave();
-  if (ws && ws.cleanupCheat) ws.cleanupCheat();
-  
+  teardown();
+
+  const [code] = routeSegments;
   ws = {
     room: null,
-    roomId: getLobbyFromUrl(),
     playerId: randomPlayerId(),
-    name: localStorage.getItem("gg_player_name") || "",
+    name: getProfile().name || "",
     isHost: false,
     startPage: "",
     endPage: "",
     players: [],
-    gameState: "menu", // menu, lobby, playing, finished
+    gameState: "menu",
     clicks: 0,
     startTime: null,
     endTime: null,
-    history: []
+    history: [],
+    timerInt: null,
+    cleanupCheat: null,
   };
+  window.addEventListener("popstate", handleExternalNavigate);
 
-  if (ws.roomId) {
-    joinLobby(ws.roomId);
-  } else {
-    showMenu();
-  }
+  if (code) joinByCode(code.toUpperCase());
+  else showMenu();
 }
 
-function setLobbyInUrl(code) {
-  history.replaceState(null, "", `${code ? `/wikispeedrun?lobby=${code.toUpperCase()}` : "/wikispeedrun"}`);
-}
-function clearLobbyFromUrl() { history.replaceState(null, "", "/wikispeedrun"); }
-function getLobbyFromUrl() {
-  return new URLSearchParams(location.search).get("lobby") || null;
-}
+// ---------- Menu ----------
 
 function showMenu() {
   clearLobbyFromUrl();
   ws.gameState = "menu";
+  const mpAvailable = hasMultiplayerConfig();
   app.innerHTML = `
     ${topbar()}
-    <div class="gg-menu">
-      <div style="text-align:center; margin-bottom: 24px;">
-        <h2>📖 Wikipedia Speedrun</h2>
-        <p>Race van het ene artikel naar het andere met zo min mogelijk clicks!</p>
-      </div>
-      
-      <div style="display:flex; flex-direction:column; gap:16px; max-width:300px; margin:0 auto;">
-        <input type="text" id="wsPlayerName" class="gg-input" placeholder="Je naam" value="${ws.name}">
-        <button class="btn" onclick="wsCreateLobby()">Maak Multiplayer Lobby</button>
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="wsLobbyCode" class="gg-input" placeholder="Lobby Code" style="flex:1; text-transform:uppercase;">
-          <button class="btn" onclick="wsJoinLobbyBtn()">Doe mee</button>
-        </div>
-      </div>
+    <div class="gametitle"><div><h2>${icon("bookOpen", { size: "sm" })} WikiSpeedrun</h2><div class="desc">Race van het startartikel naar het eindartikel, enkel via links.</div></div></div>
+    <div class="card" style="cursor:pointer;" onclick="wsShowSoloSetup()">
+      ${icon("flag", { size: "lg" })}
+      <h3>Solo spelen</h3>
+      <p>Kies of loot een start- en eindartikel en race in je eentje tegen de klok.</p>
     </div>
-  `;
+    <div class="card" style="cursor:${mpAvailable ? "pointer" : "default"}; opacity:${mpAvailable ? "1" : "0.55"}; margin-top:12px;" ${mpAvailable ? 'onclick="wsShowMultiplayerMenu()"' : ""}>
+      ${icon("users", { size: "lg" })}
+      <h3>Multiplayer</h3>
+      <p>${mpAvailable ? "Race tegelijk met vrienden in dezelfde lobby." : "Multiplayer is niet geconfigureerd."}</p>
+    </div>`;
+}
+window.wsShowMenu = showMenu;
+
+// ---------- Solo ----------
+
+window.wsShowSoloSetup = function () {
+  ws.gameState = "soloSetup";
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>${icon("flag", { size: "sm" })} Solo instellen</h2><div class="desc">Kies een start- en eindartikel.</div></div></div>
+    <div class="card" style="cursor:default;">
+      ${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}
+      ${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}
+      <div id="wsSoloError" class="small" style="color:var(--danger); margin-top:10px; display:none;"></div>
+    </div>
+    <div class="footerrow">
+      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" onclick="wsStartSolo()">Start ${icon("chevronRight", { size: "sm" })}</button>
+    </div>`;
+  attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; });
+  attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; });
+};
+
+window.wsStartSolo = function () {
+  const start = (document.getElementById("wsStartPage")?.value || "").trim();
+  const end = (document.getElementById("wsEndPage")?.value || "").trim();
+  const errEl = document.getElementById("wsSoloError");
+  const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
+  if (!start || !end) return showError("Kies eerst een start- en eindartikel.");
+  if (start.toLowerCase() === end.toLowerCase()) return showError("Start- en eindartikel moeten verschillend zijn.");
+
+  ws.startPage = start;
+  ws.endPage = end;
+  ws.isHost = false;
+  ws.room = null;
+  startRun();
+};
+
+// Gedeeld tussen de solo-instellingen en de host-instellingen in de lobby.
+function articleFieldHtml(id, label, value) {
+  return `
+    <label class="gg-label" ${id === "wsEndPage" ? 'style="margin-top:16px;"' : ""}>${label}</label>
+    <div style="display:flex; gap:8px; position:relative;">
+      <input id="${id}" type="text" autocomplete="off" placeholder="Zoek of typ een titel..." value="${value || ""}"
+        style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
+      <button class="btn" onclick="wsSetRandom('${id}')" title="Willekeurig artikel">${icon("dice", { size: "sm" })}</button>
+    </div>`;
 }
 
-window.wsCreateLobby = function() {
-  const name = document.getElementById("wsPlayerName").value.trim() || "Speler";
-  localStorage.setItem("gg_player_name", name);
-  ws.name = name;
-  ws.isHost = true;
-  ws.roomId = randomRoomCode();
-  joinLobby(ws.roomId);
-};
-
-window.wsJoinLobbyBtn = function() {
-  const name = document.getElementById("wsPlayerName").value.trim() || "Speler";
-  const code = document.getElementById("wsLobbyCode").value.trim().toUpperCase();
-  if (!code) return;
-  localStorage.setItem("gg_player_name", name);
-  ws.name = name;
-  joinLobby(code);
-};
-
-function joinLobby(code) {
-  if (!hasMultiplayerConfig()) {
-    alert("Supabase multiplayer is niet geconfigureerd.");
-    return showMenu();
+window.wsSetRandom = async function (inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const prev = input.value;
+  input.disabled = true;
+  input.value = "Zoeken...";
+  try {
+    const title = await fetchWikiRandom();
+    input.value = title;
+    if (inputId === "wsStartPage") ws.startPage = title; else ws.endPage = title;
+    if (ws.isHost) scheduleSync();
+  } catch (e) {
+    input.value = prev;
+    wsToast("Kon geen willekeurig artikel ophalen.");
   }
-  
-  ws.gameState = "lobby";
-  setLobbyInUrl(code);
-  ws.room = new GameRoom("wiki_" + code, ws.playerId, { name: ws.name });
-  
+  input.disabled = false;
+};
+
+// ---------- Multiplayer: menu ----------
+
+window.wsShowMultiplayerMenu = function () {
+  if (!hasMultiplayerConfig()) return showMenu();
+  ws.gameState = "mpMenu";
   app.innerHTML = `
     ${topbar()}
-    <div class="gg-lobby">
-      <h2>Lobby: ${code}</h2>
-      <div style="display:flex; gap:20px; flex-wrap:wrap; margin-top:20px;">
-        <div style="flex:1; min-width:300px;" class="gg-card">
-          <h3>Spelers</h3>
-          <ul id="wsPlayerList" style="list-style:none; padding:0; margin-top:10px;"></ul>
-        </div>
-        <div style="flex:1; min-width:300px;" class="gg-card">
-          <h3>Instellingen</h3>
-          ${ws.isHost ? `
-            <div style="margin-top:10px;">
-              <label style="display:block; margin-bottom:5px; font-weight:bold;">Start Artikel</label>
-              <div style="display:flex; gap:5px; position:relative;">
-                <input type="text" id="wsStartPage" class="gg-input" style="flex:1;" placeholder="Zoek of vul in..." autocomplete="off">
-                <button class="btn" onclick="wsSetRandom('wsStartPage')" title="Random Artikel" style="padding:0 12px; font-size:20px;">🎲</button>
-              </div>
-              
-              <label style="display:block; margin-top:15px; margin-bottom:5px; font-weight:bold;">Eind Artikel</label>
-              <div style="display:flex; gap:5px; position:relative;">
-                <input type="text" id="wsEndPage" class="gg-input" style="flex:1;" placeholder="Zoek of vul in..." autocomplete="off">
-                <button class="btn" onclick="wsSetRandom('wsEndPage')" title="Random Artikel" style="padding:0 12px; font-size:20px;">🎲</button>
-              </div>
-              
-              <button class="btn" onclick="wsStartGame()" style="width:100%; margin-top:20px; font-size:18px;">Start Spel</button>
-            </div>
-          ` : `
-            <p>Wachten tot de host het spel start...</p>
-            <p id="wsHostSettingsView" style="margin-top:10px; font-size:18px;">Start: <strong>...</strong><br><br>Eind: <strong>...</strong></p>
-          `}
-        </div>
-      </div>
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} WikiSpeedrun multiplayer</h2><div class="desc">Race tegelijk met vrienden.</div></div></div>
+    <div class="card" style="cursor:pointer;" onclick="wsShowHostSetup()">
+      ${icon("plus", { size: "lg" })}
+      <h3>Lobby hosten</h3>
+      <p>Maak een lobby aan en kies straks samen het start- en eindartikel.</p>
     </div>
-  `;
+    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="wsShowJoinSetup()">
+      ${icon("key", { size: "lg" })}
+      <h3>Lobby joinen</h3>
+      <p>Heb je een code van een vriend gekregen? Vul 'm hier in.</p>
+    </div>
+    <div class="footerrow">
+      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button><div></div>
+    </div>`;
+};
 
-  if (ws.isHost) {
-    attachWikiAutocomplete("wsStartPage");
-    attachWikiAutocomplete("wsEndPage");
+function nameFieldHtml() {
+  return `
+    <label class="gg-label">Jouw naam</label>
+    <input id="wsNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${ws.name || ""}"
+      style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />`;
+}
+
+window.wsShowHostSetup = function () {
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} Lobby hosten</h2><div class="desc">Kies je naam en maak de lobby aan.</div></div></div>
+    <div class="card" style="cursor:default;">${nameFieldHtml()}</div>
+    <div class="footerrow">
+      <button class="btn" onclick="wsShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" onclick="wsHostLobby()">Kamer aanmaken ${icon("chevronRight", { size: "sm" })}</button>
+    </div>`;
+};
+
+window.wsHostLobby = function () {
+  const name = (document.getElementById("wsNameInput")?.value || "").trim() || "Speler";
+  saveProfile({ ...getProfile(), name });
+  ws.name = name;
+  ws.isHost = true;
+  enterLobby(randomRoomCode());
+};
+
+window.wsShowJoinSetup = function () {
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} Lobby joinen</h2><div class="desc">Vul je naam en de lobby-code in.</div></div></div>
+    <div class="card" style="cursor:default;">
+      ${nameFieldHtml()}
+      <label class="gg-label" style="margin-top:16px;">Lobby-code</label>
+      <input id="wsCodeInput" type="text" placeholder="bv. LFFW" maxlength="6"
+        style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; text-transform:uppercase;" />
+    </div>
+    <div class="footerrow">
+      <button class="btn" onclick="wsShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" onclick="wsSubmitJoin()">Join ${icon("chevronRight", { size: "sm" })}</button>
+    </div>`;
+};
+
+window.wsSubmitJoin = function () {
+  const name = (document.getElementById("wsNameInput")?.value || "").trim() || "Speler";
+  const code = (document.getElementById("wsCodeInput")?.value || "").trim().toUpperCase();
+  if (!code) return wsToast("Vul een lobby-code in.");
+  saveProfile({ ...getProfile(), name });
+  ws.name = name;
+  ws.isHost = false;
+  enterLobby(code);
+};
+
+// Binnenkomst via een gedeelde link ("/wikispeedrun/CODE"): eerst naam vragen,
+// net als GeoGuesser's auto-join-scherm.
+function joinByCode(code) {
+  ws.gameState = "autoJoin";
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby joinen</h2><div class="desc">Je bent uitgenodigd voor lobby <strong>${code}</strong>.</div></div></div>
+    <div class="card" style="cursor:default;">${nameFieldHtml()}</div>
+    <div class="footerrow">
+      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" onclick="wsAutoJoin('${code}')">Joinen ${icon("chevronRight", { size: "sm" })}</button>
+    </div>`;
+}
+window.wsAutoJoin = function (code) {
+  const name = (document.getElementById("wsNameInput")?.value || "").trim() || "Speler";
+  saveProfile({ ...getProfile(), name });
+  ws.name = name;
+  ws.isHost = false;
+  enterLobby(code);
+};
+
+// ---------- Lobby ----------
+
+async function enterLobby(code) {
+  code = code.toUpperCase();
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${code}</h2><div class="desc">Verbinden...</div></div></div>`;
+
+  // Belangrijkste fix in dit bestand: de room werd voorheen nooit echt
+  // verbonden (geen connect()-aanroep), en de naam werd als een object
+  // i.p.v. een string doorgegeven — daardoor deed multiplayer hier
+  // helemaal niets.
+  ws.room = new GameRoom("wiki_" + code, ws.playerId, ws.name);
+  try {
+    await ws.room.connect();
+  } catch (e) {
+    app.innerHTML = `
+      ${topbar()}
+      <div class="card" style="cursor:default; text-align:center;">
+        ${icon("warning", { size: "xl" })}
+        <h3>Kon niet verbinden</h3>
+        <p>${e.message || "Onbekende fout."}</p>
+        <button class="btn primary" onclick="wsShowMultiplayerMenu()" style="margin-top:10px;">Terug</button>
+      </div>`;
+    return;
   }
 
-  ws.room.on("update", (players) => {
-    ws.players = players;
-    renderPlayerList();
-  });
-  
+  ws.gameState = "lobby";
+  setLobbyInUrl(code);
+
+  // Spelerslijst kwam voorheen via `room.on("update", ...)` binnen, maar
+  // GameRoom stuurt presence-updates via `onPresence`, niet via `on()` —
+  // die listener vuurde dus nooit.
+  ws.room.onPresence((players) => { ws.players = players; renderPlayerList(); });
   ws.room.on("settings", (s) => {
     ws.startPage = s.startPage;
     ws.endPage = s.endPage;
-    if (!ws.isHost) {
-      const view = document.getElementById("wsHostSettingsView");
-      if (view) view.innerHTML = `Start: <strong>${s.startPage || "..."}</strong><br><br>Eind: <strong>${s.endPage || "..."}</strong>`;
-    }
+    if (!ws.isHost) updateGuestRouteView();
   });
-
   ws.room.on("start", (payload) => {
     ws.startPage = payload.startPage;
     ws.endPage = payload.endPage;
     startRun();
   });
-  
   ws.room.on("progress", (msg) => renderScoreboard(msg, "progress"));
   ws.room.on("finish", (msg) => renderScoreboard(msg, "finish"));
+
+  drawLobby();
 }
 
-function syncSettings() {
-  ws.startPage = document.getElementById("wsStartPage")?.value || "";
-  ws.endPage = document.getElementById("wsEndPage")?.value || "";
-  ws.room.send("settings", { startPage: ws.startPage, endPage: ws.endPage });
+function scheduleSync() {
+  if (!ws.isHost || !ws.room) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    ws.room.send("settings", { startPage: ws.startPage, endPage: ws.endPage });
+  }, 250);
 }
 
-window.wsSetRandom = async function(inputId) {
-  const input = document.getElementById(inputId);
-  if (!input) return;
-  input.value = "Zoeken...";
-  input.disabled = true;
-  try {
-    const title = await fetchWikiRandom();
-    input.value = title;
-    if (ws.isHost) syncSettings();
-  } catch(e) {
-    input.value = "";
-    alert("Fout bij ophalen random artikel.");
+function drawLobby() {
+  const shareUrl = `${location.origin}/wikispeedrun/${ws.room.code}`;
+  app.innerHTML = `
+    ${topbar()}
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${ws.room.code}</h2><div class="desc">${ws.isHost ? "Deel de link met je vrienden." : "Wachten tot de host het spel start..."}</div></div></div>
+    <div class="card" style="cursor:default; text-align:center;">
+      <div class="small">Lobby-code</div>
+      <h3 style="font-size:32px; letter-spacing:6px; margin:6px 0;">${ws.room.code}</h3>
+      <div class="gg-share-row">
+        <input class="gg-share-input" id="wsShareUrl" value="${shareUrl}" readonly />
+        <button class="btn" onclick="wsCopyLink()">${icon("clipboard", { size: "sm" })} Kopieer</button>
+      </div>
+    </div>
+    <div class="card" style="cursor:default; margin-top:12px;">
+      <h3 style="margin-bottom:10px;">${icon("flag", { size: "sm" })} Route</h3>
+      ${ws.isHost
+        ? `${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}`
+        : `<p id="wsGuestRoute" class="small">Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong></p>`}
+    </div>
+    <div class="guesslist" style="margin-top:14px;" id="wsPlayerList"></div>
+    <div class="footerrow">
+      <button class="btn" onclick="wsLeaveLobby()">${icon("chevronLeft", { size: "sm" })} Lobby verlaten</button>
+      ${ws.isHost ? `<button class="btn primary" onclick="wsStartGame()">Start spel ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
+    </div>`;
+
+  if (ws.isHost) {
+    attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; scheduleSync(); });
+    attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; scheduleSync(); });
   }
-  input.disabled = false;
+  renderPlayerList();
+}
+
+function updateGuestRouteView() {
+  const el = document.getElementById("wsGuestRoute");
+  if (el) el.innerHTML = `Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong>`;
+}
+
+window.wsCopyLink = function () {
+  const input = document.getElementById("wsShareUrl");
+  if (!input) return;
+  navigator.clipboard.writeText(input.value).catch(() => { input.select(); document.execCommand("copy"); });
+  const btn = input.nextElementSibling;
+  if (btn) {
+    btn.innerHTML = `${icon("check", { size: "sm" })} Gekopieerd!`;
+    setTimeout(() => { btn.innerHTML = `${icon("clipboard", { size: "sm" })} Kopieer`; }, 2000);
+  }
 };
 
-window.wsStartGame = function() {
-  if (!ws.startPage || !ws.endPage) return alert("Kies een start- en eindartikel!");
-  ws.room.send("start", { startPage: ws.startPage, endPage: ws.endPage });
+window.wsLeaveLobby = function () {
+  teardown();
+  ws.room = null;
+  showMenu();
+};
+
+window.wsStartGame = function () {
+  // Rechtstreeks uit de velden lezen i.p.v. te vertrouwen op ws.startPage/
+  // endPage: die werden voorheen alleen bijgewerkt als je iets uit de
+  // dropdown koos, dus een getypte-maar-niet-aangeklikte titel werd hier
+  // altijd als "leeg" gezien.
+  const start = (document.getElementById("wsStartPage")?.value || ws.startPage || "").trim();
+  const end = (document.getElementById("wsEndPage")?.value || ws.endPage || "").trim();
+  if (!start || !end) return wsToast("Kies eerst een start- en eindartikel.");
+  if (start.toLowerCase() === end.toLowerCase()) return wsToast("Start en eind moeten verschillend zijn.");
+  ws.startPage = start;
+  ws.endPage = end;
+  ws.room.send("start", { startPage: start, endPage: end });
 };
 
 function renderPlayerList() {
   const list = document.getElementById("wsPlayerList");
   if (!list) return;
-  list.innerHTML = ws.players.map(p => `
-    <li style="padding:10px; background:rgba(0,0,0,0.2); margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
-      <span>${p.name} ${p.playerId === ws.playerId ? "(Jij)" : ""}</span>
-    </li>
-  `).join("");
+  list.innerHTML = ws.players.map((p) => `
+    <div class="gitem">
+      <div class="name">${icon("user", { size: "sm" })} ${p.name || "Speler"}${p.playerId === ws.playerId ? " (jij)" : ""}</div>
+      <div></div><div></div><div></div>
+    </div>`).join("");
 }
 
-// --- Game Loop ---
+// ---------- Race ----------
 
 async function startRun() {
   ws.gameState = "playing";
@@ -282,59 +483,54 @@ async function startRun() {
   ws.history = [ws.startPage];
   ws.startTime = Date.now();
   ws.endTime = null;
-  
-  app.innerHTML = `
-    <div id="wsHeader" style="position:fixed; top:0; left:0; right:0; height:60px; background:#222; color:white; display:flex; justify-content:space-between; align-items:center; padding:0 20px; z-index:9999; box-shadow:0 2px 10px rgba(0,0,0,0.5);">
-      <div style="font-size:14px; flex:1;">
-        <div>Doel: <strong>${ws.endPage}</strong></div>
-        <div style="color:#aaa;">Vanaf: ${ws.startPage}</div>
-      </div>
-      <div style="font-size:24px; font-weight:bold; font-family:monospace; flex:1; text-align:center;" id="wsTimer">00:00</div>
-      <div style="font-size:18px; flex:1; text-align:right;">Clicks: <strong id="wsClicks">0</strong></div>
-    </div>
-    
-    <!-- Sidebar for multiplayer progress -->
-    <div id="wsSidebar" style="position:fixed; top:60px; right:0; width:250px; bottom:0; background:#333; color:white; overflow-y:auto; padding:15px; z-index:9998; border-left:1px solid #444;">
-      <h3 style="margin-top:0; font-size:16px;">Spelers</h3>
-      <div id="wsPlayerProgress"></div>
-    </div>
 
-    <!-- Wiki content container -->
-    <div id="wsWikiContainer" style="margin-top:60px; margin-right:250px; padding:20px; background:white; color:black; min-height:calc(100vh - 60px);">
-      <h2 style="text-align:center; margin-top:50px;">Artikel laden...</h2>
+  app.innerHTML = `
+    <div class="ws-run-header" id="wsHeader">
+      <div class="ws-run-info">
+        <div>Doel: <strong>${ws.endPage}</strong></div>
+        <div class="small">Vanaf: ${ws.startPage}</div>
+      </div>
+      <div class="ws-run-timer" id="wsTimer">00:00</div>
+      <div class="ws-run-clicks">Clicks: <strong id="wsClicks">0</strong></div>
     </div>
-  `;
-  
-  // Timer loop
+    ${ws.room ? `
+    <div class="ws-sidebar" id="wsSidebar">
+      <h3>${icon("users", { size: "sm" })} Spelers</h3>
+      <div id="wsPlayerProgress"></div>
+    </div>` : ""}
+    <div class="ws-wiki-wrap ${ws.room ? "ws-with-sidebar" : ""}" id="wsWikiContainer">
+      <h2 style="text-align:center; margin-top:50px;">Artikel laden...</h2>
+    </div>`;
+
   const timerEl = document.getElementById("wsTimer");
-  const timerInt = setInterval(() => {
-    if (ws.endTime || ws.gameState !== "playing") return clearInterval(timerInt);
+  ws.timerInt = setInterval(() => {
+    if (ws.endTime || ws.gameState !== "playing") { clearInterval(ws.timerInt); return; }
     const ms = Date.now() - ws.startTime;
     const m = String(Math.floor(ms / 60000)).padStart(2, "0");
     const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, "0");
-    if(timerEl) timerEl.textContent = `${m}:${s}`;
+    if (timerEl) timerEl.textContent = `${m}:${s}`;
   }, 1000);
-  
-  // Anti-cheat (Ctrl+F)
+
   const antiCheat = (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
-      alert("Zoeken (Ctrl+F) is geblokkeerd tijdens Speedruns!");
+      wsToast("Zoeken (Ctrl+F) is geblokkeerd tijdens de Speedrun!");
     }
   };
   window.addEventListener("keydown", antiCheat);
   ws.cleanupCheat = () => window.removeEventListener("keydown", antiCheat);
 
-  renderScoreboard();
+  if (ws.room) renderScoreboard();
   await loadArticle(ws.startPage);
 }
 
-window.wsHandleLinkClick = function(e, targetTitle) {
+window.wsHandleLinkClick = function (e, targetTitle) {
   e.preventDefault();
-  if (ws.endTime) return; // already finished
-  
+  if (ws.endTime) return; // al klaar
+
   ws.clicks++;
-  document.getElementById("wsClicks").textContent = ws.clicks;
+  const clicksEl = document.getElementById("wsClicks");
+  if (clicksEl) clicksEl.textContent = ws.clicks;
   ws.history.push(targetTitle);
   loadArticle(targetTitle);
 };
@@ -342,97 +538,102 @@ window.wsHandleLinkClick = function(e, targetTitle) {
 async function loadArticle(title) {
   const container = document.getElementById("wsWikiContainer");
   if (!container) return;
-  
+
   container.innerHTML = `<h2 style="text-align:center; margin-top:50px;">Laden van <em>${title}</em>...</h2>`;
   window.scrollTo(0, 0);
-  
+
   try {
     const page = await fetchWikiPage(title);
-    
-    // Stuur progressie naar lobby
-    ws.room.send("progress", { clicks: ws.clicks, current: page.title });
-    
-    // Check if won
+
+    if (ws.room) ws.room.send("progress", { clicks: ws.clicks, current: page.title });
+
     if (page.title.toLowerCase() === ws.endPage.toLowerCase()) {
       winGame(page.title);
       return;
     }
-    
-    // Render HTML directly. We wrap it so we can style it via CSS to look like Wikipedia.
+
     container.innerHTML = `
       <div class="wiki-content">
         <h1 class="wiki-title">${page.title}</h1>
         <div class="wiki-body">${page.html}</div>
-      </div>
-    `;
-    
-    // Clean up wikipedia specific stuff that breaks UI or allows cheating
-    container.querySelectorAll(".navbox, .reflist, .infobox, .reference, .mw-editsection, .noprint, #toc").forEach(el => el.remove());
-    
-    // Hijack internal links
-    container.querySelectorAll("a").forEach(a => {
+      </div>`;
+
+    // Wikipedia-specifieke elementen weghalen die de UI breken of vals spelen mogelijk maken.
+    container.querySelectorAll(".navbox, .reflist, .infobox, .reference, .mw-editsection, .noprint, #toc").forEach((el) => el.remove());
+
+    // Interne links kapen zodat een klik een nieuwe ronde in het spel start i.p.v. een echte navigatie.
+    container.querySelectorAll("a").forEach((a) => {
       const href = a.getAttribute("href");
       if (href && href.startsWith("/wiki/") && !href.includes(":")) {
         const targetTitle = decodeURIComponent(href.replace("/wiki/", "")).replace(/_/g, " ").split("#")[0];
         a.href = "#";
         a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
       } else {
-        // External links or special namespaces (File:, Category:) are disabled
+        // Externe links of speciale namespaces (Bestand:, Categorie:) staan uit.
         a.style.color = "inherit";
         a.style.textDecoration = "none";
         a.style.pointerEvents = "none";
         a.onclick = (e) => e.preventDefault();
       }
     });
-    
-  } catch(e) {
-    container.innerHTML = `<div style="color:red; text-align:center; margin-top:50px;">
-      <h2>Fout bij laden van artikel: ${title}</h2>
-      <button class="btn" onclick="wsHandleLinkClick(event, '${ws.history[ws.history.length-2]}')">Terug</button>
-    </div>`;
+  } catch (e) {
+    const prevTitle = ws.history.length > 1 ? ws.history[ws.history.length - 2] : null;
+    container.innerHTML = `
+      <div style="text-align:center; margin-top:50px;">
+        <h2 style="color:var(--danger);">Fout bij laden van artikel: ${title}</h2>
+        ${prevTitle ? `<button class="btn" onclick="wsHandleLinkClick(event, '${prevTitle}')">${icon("chevronLeft", { size: "sm" })} Terug</button>` : ""}
+      </div>`;
   }
 }
 
 function winGame(finalTitle) {
   ws.endTime = Date.now();
+  ws.gameState = "finished";
   if (ws.cleanupCheat) ws.cleanupCheat();
-  
+
   const timeMs = ws.endTime - ws.startTime;
-  ws.room.send("finish", { clicks: ws.clicks, time: timeMs });
-  
+  if (ws.room) ws.room.send("finish", { clicks: ws.clicks, time: timeMs });
+
   const container = document.getElementById("wsWikiContainer");
   if (container) {
     container.innerHTML = `
-      <div style="text-align:center; padding:50px; background:white; color:black; border-radius:10px; margin:50px auto; max-width:600px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
-        <h1 style="color:#2ecc71; font-size:48px; margin-bottom:10px;">🏁 Gehaald!</h1>
-        <p style="font-size:20px;">Je hebt <strong>${ws.endPage}</strong> bereikt in <strong>${ws.clicks}</strong> clicks!</p>
-        <p style="font-size:18px; color:#666;">Tijd: ${(timeMs / 1000).toFixed(1)} seconden</p>
-        <button class="btn" onclick="renderWikiSpeedrun(document.getElementById('app'))" style="margin-top:30px; font-size:20px; padding:10px 30px;">Terug naar Lobby</button>
-      </div>
-    `;
+      <div class="ws-finish-card">
+        ${icon("flag", { size: "xl" })}
+        <h1>Gehaald!</h1>
+        <p>Je hebt <strong>${ws.endPage}</strong> bereikt in <strong>${ws.clicks}</strong> clicks!</p>
+        <p class="small">Tijd: ${(timeMs / 1000).toFixed(1)} seconden</p>
+        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} Terug naar menu</button>
+      </div>`;
   }
 }
+
+window.wsBackToMenu = function () {
+  setUrlPath("/wikispeedrun");
+  renderWikiSpeedrun(app);
+};
 
 function renderScoreboard(msgPayload, type) {
   const board = document.getElementById("wsPlayerProgress");
   if (!board) return;
-  
-  if (msgPayload && msgPayload.playerId) {
-    const p = ws.players.find(x => x.playerId === msgPayload.playerId);
+
+  // GameRoom.send() stempelt de afzender als `from`, niet als `playerId` —
+  // hierdoor werd hier voorheen nooit een speler gevonden en bleef het
+  // scorebord altijd leeg.
+  if (msgPayload && msgPayload.from) {
+    const p = ws.players.find((x) => x.playerId === msgPayload.from);
     if (p) {
       if (type === "finish") {
         p.finished = true;
         p.finalClicks = msgPayload.clicks;
         p.finalTime = msgPayload.time;
-        p.progress = `Klaar! (${msgPayload.clicks} clicks)`;
       } else if (type === "progress") {
-        p.progress = `${msgPayload.current} (${msgPayload.clicks} clicks)`;
+        p.progress = msgPayload.current;
+        p.progressClicks = msgPayload.clicks;
       }
     }
   }
 
-  // Sort by finish (finished first, then clicks, then time)
-  const sorted = [...ws.players].sort((a,b) => {
+  const sorted = [...ws.players].sort((a, b) => {
     if (a.finished && !b.finished) return -1;
     if (!a.finished && b.finished) return 1;
     if (a.finished && b.finished) {
@@ -442,15 +643,9 @@ function renderScoreboard(msgPayload, type) {
     return 0;
   });
 
-  board.innerHTML = sorted.map(p => {
-    let color = p.finished ? "#2ecc71" : "#fff";
-    return `
-      <div style="background:rgba(0,0,0,0.3); padding:10px; margin-bottom:10px; border-radius:5px; border-left:4px solid ${color};">
-        <strong style="display:block; margin-bottom:4px;">${p.name}</strong>
-        <div style="font-size:12px; color:#bbb; line-height:1.4;">
-          ${p.progress || 'Startpagina...'}
-        </div>
-      </div>
-    `;
-  }).join("");
+  board.innerHTML = sorted.map((p) => `
+    <div class="ws-sidebar-player ${p.finished ? "ws-finished" : ""}">
+      <strong>${p.name || "Speler"}</strong>
+      <div class="small">${p.finished ? `Klaar! (${p.finalClicks} clicks)` : (p.progress ? `${p.progress} (${p.progressClicks} clicks)` : "Startpagina...")}</div>
+    </div>`).join("");
 }

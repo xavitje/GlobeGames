@@ -1685,6 +1685,112 @@ a.linklike {
 }
 
 /* --- Wikipedia Speedrun --- */
+.ws-run-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+}
+.ws-run-info {
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+.ws-run-info .small {
+  color: var(--sub);
+}
+.ws-run-timer {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+.ws-run-clicks {
+  font-size: 14px;
+  flex: 1;
+  text-align: right;
+}
+.ws-sidebar {
+  position: fixed;
+  top: 56px;
+  right: 0;
+  bottom: 0;
+  width: 250px;
+  overflow-y: auto;
+  padding: var(--space-4);
+  background: var(--panel2);
+  border-left: 1px solid var(--border);
+  z-index: 400;
+}
+.ws-sidebar h3 {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.ws-sidebar-player {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.ws-sidebar-player.ws-finished {
+  border-left-color: var(--good);
+}
+.ws-wiki-wrap {
+  margin-top: 56px;
+  padding: var(--space-6);
+  background: #fff;
+  color: #202122;
+  min-height: calc(100vh - 56px);
+}
+.ws-wiki-wrap.ws-with-sidebar {
+  margin-right: 250px;
+}
+.ws-finish-card {
+  text-align: center;
+  padding: var(--space-8) var(--space-6);
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin: 50px auto;
+  max-width: 520px;
+  box-shadow: var(--shadow);
+}
+.ws-finish-card .icon {
+  color: var(--good);
+  margin: 0 auto var(--space-2);
+}
+.ws-finish-card h1 {
+  font-size: 30px;
+  margin: 0 0 var(--space-2);
+}
+.ws-finish-card p {
+  margin: var(--space-1) 0;
+}
+.ws-finish-card .btn {
+  margin-top: var(--space-5);
+}
+@media (max-width: 720px) {
+  .ws-sidebar { display: none; }
+  .ws-wiki-wrap.ws-with-sidebar { margin-right: 0; }
+}
+
 .wiki-content {
   font-family: sans-serif;
   line-height: 1.6;

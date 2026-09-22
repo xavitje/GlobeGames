@@ -24,7 +24,7 @@ function renderRoute() {
   else if (view === "silhouette") renderSilhouette(app);
   else if (view === "globle") renderGlobleGame(app);
   else if (view === "geoguesser") renderGeoGuesser(app, rest);
-  else if (view === "wikispeedrun") renderWikiSpeedrun(app);
+  else if (view === "wikispeedrun") renderWikiSpeedrun(app, rest);
   else {
     app.innerHTML = `
     ${topbar()}
