@@ -222,6 +222,41 @@ function scoreForDistance(km) {
 
 // ---------- Multiplayer round timer (host-configurable) ----------
 
+// ---------- Moeilijkheidsgraad + zwart-wit (gedeeld tussen solo en mp) ----------
+
+function difficultySettingHtml(idPrefix, difficulty, blackwhite) {
+  const d = difficulty || "free";
+  return `
+    <label class="gg-label" style="margin-top:16px;">Moeilijkheidsgraad</label>
+    <div class="gg-pill-row" id="${idPrefix}DifficultyPills">
+      <button class="gg-pill-btn${d === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
+      <button class="gg-pill-btn${d === "nomove" ? " active" : ""}" data-v="nomove">Niet bewegen</button>
+      <button class="gg-pill-btn${d === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
+      <button class="gg-pill-btn${d === "gamble" ? " active" : ""}" data-v="gamble" title="Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.">🎰 Gokken</button>
+    </div>
+    <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" id="${idPrefix}BlackWhite" ${blackwhite ? "checked" : ""} /> Zwart-wit
+    </label>`;
+}
+
+function wireDifficultySetting(idPrefix) {
+  const row = document.getElementById(`${idPrefix}DifficultyPills`);
+  if (!row) return;
+  row.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-v]"); if (!btn) return;
+    row.querySelectorAll(".gg-pill-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+  });
+}
+
+function readDifficultySetting(idPrefix) {
+  const btn = document.querySelector(`#${idPrefix}DifficultyPills .gg-pill-btn.active`);
+  return {
+    difficulty: btn ? btn.dataset.v : "free",
+    blackwhite: !!document.getElementById(`${idPrefix}BlackWhite`)?.checked,
+  };
+}
+
 function timerSettingHtml(idPrefix, seconds) {
   const enabled = seconds != null;
   const val = seconds || 60;
@@ -971,6 +1006,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
       ${locationSettingHtml("mp", prefill.locationSet)}
+      ${difficultySettingHtml("mp", prefill.difficulty, prefill.blackwhite)}
       ${timerSettingHtml("mp", prefill.roundTime || null)}
     </div>
     ${adSlotHtml("geoguesserSettings")}
@@ -985,6 +1021,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
     btn.classList.add("active");
   });
   wireLocationSetting("mp");
+  wireDifficultySetting("mp");
   wireTimerSetting("mp");
 };
 
@@ -1051,11 +1088,13 @@ function getPlayerName() {
 
 function getMpSettings() {
   const roundBtn = document.querySelector("#mpRoundPills .gg-pill-btn.active");
+  const { difficulty, blackwhite } = readDifficultySetting("mp");
   return {
     rounds: roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5,
     locationSet: readLocationSetting("mp"),
     roundTime: readTimerSetting("mp"),
     gameMode: document.getElementById("mpGameMode")?.value || "ffa",
+    difficulty, blackwhite,
   };
 }
 
@@ -1138,11 +1177,13 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   gg = { mode: "mp", room, isHost, playerId, name, round: 0,
     rounds: settings?.rounds ?? 5, locationSet: settings?.locationSet ?? "world",
     roundTime: settings?.roundTime ?? null,
+    difficulty: settings?.difficulty ?? "free", blackwhite: settings?.blackwhite ?? false,
     gameMode: settings?.gameMode ?? "ffa", teams: {}, hp: {}, alive: new Set(), eliminated: [],
     teamScore: { A: 0, B: 0 },
     pointFn: buildPointFn(settings?.locationSet ?? "world"),
     usedPanos: new Set(), scoreboard: {}, history: [], guess: null, submitted: false,
     map: null, guessMarker: null, resultMap: null, panorama: null,
+    pendingMpWager: null,
     currentGuesses: {}, roundStartPlayers: [], roundTimer: null };
 
   try { await room.connect(); }
@@ -1165,6 +1206,8 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   room.on("teams", onMpTeamsReceived);
   room.on("chat", onMpChatReceived);
   room.on("resync", onMpResyncRequest);
+  room.on("wager", onMpWagerReceived);
+  room.on("scoreupdate", onMpScoreUpdateReceived);
 
   room.onConnectionChange((status) => {
     if (status === "disconnected") {
@@ -1219,6 +1262,8 @@ function onMpSettingsReceived(payload) {
   gg.rounds = payload.rounds; gg.locationSet = payload.locationSet;
   gg.roundTime = payload.roundTime ?? null;
   gg.gameMode = payload.gameMode ?? "ffa";
+  gg.difficulty = payload.difficulty ?? "free";
+  gg.blackwhite = payload.blackwhite ?? false;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
@@ -1419,7 +1464,7 @@ function onMpResyncRequest() {
   } else if (gg.screen === "gameover" && gg.lastGameOverPayload) {
     gg.room.send("gameover", gg.lastGameOverPayload);
   } else if (gg.screen === "lobby") {
-    gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode });
+    gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite });
     gg.room.send("teams", { teams: gg.teams });
   }
 }
@@ -1445,7 +1490,7 @@ window.ggMpStartGame = function () {
     gg.eliminated = [];
   }
 
-  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode });
+  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite });
   gg.room.send("teams", { teams: gg.teams });
   hostAdvanceRound();
 };
@@ -1483,6 +1528,16 @@ function onMpRoundStart(payload) {
   // Idempotency: existing players ignore re-broadcasts (for late-joiner catch-up)
   if (gg.screen === "round" && gg.round === payload.round) return;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
+
+  // Nog niet incasseren/gokken gekozen voor de vorige ronde? Dan schrijf je
+  // 'm automatisch veilig bij zodat je niets kwijtraakt door de nieuwe
+  // ronde te missen. Sluit ook een eventueel nog open rad-scherm.
+  document.getElementById("ggWagerOverlay")?.remove();
+  if (gg.pendingMpWager) {
+    const pts = gg.pendingMpWager.pts;
+    gg.pendingMpWager = null;
+    ggMpSendWagerResult(pts);
+  }
 
   gg.round = payload.round; gg.current = payload; gg.guess = null;
   gg.submitted = false; gg.screen = "round";
@@ -1540,7 +1595,14 @@ function hostFinishRound() {
     const km = haversineKm([g.lng, g.lat], [answer.lng, answer.lat]);
     const pts = scoreForDistance(km);
     if (!gg.scoreboard[playerId]) gg.scoreboard[playerId] = { name: g.name, total: 0 };
-    gg.scoreboard[playerId].total += pts;
+    // Gokmodus: de ronde-punten gaan pas op het scorebord als de speler zelf
+    // kiest om ze veilig te incasseren of te verdubbelen bij het rad (zie
+    // ggMpBankPoints()/ggMpOpenWager() + onMpWagerReceived hieronder) — net
+    // als in solo. Andere spelmodi (duels/team duels/BR) blijven altijd op
+    // de ruwe ronde-punten rekenen, ongeacht of iemand nog aan het gokken is.
+    if (!(gg.difficulty === "gamble" && pts > 0)) {
+      gg.scoreboard[playerId].total += pts;
+    }
     gg.scoreboard[playerId].name = g.name;
     return { playerId, name: g.name, lat: g.lat, lng: g.lng, km, pts };
   });
@@ -1601,6 +1663,16 @@ function onMpResults(payload) {
   if (gg.map) { clearGoogleMap(gg.map); gg.map = null; gg.guessMarker = null; }
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   document.getElementById("ggFullscreenWrap")?.remove();
+
+  // Gokmodus: eigen ronde-punten (nog niet op het scorebord) staan klaar om
+  // veilig in te casseren of te wagen — zie ggMpBankPoints()/ggMpOpenWager().
+  if (gg.difficulty === "gamble") {
+    const own = payload.guesses.find((g) => g.playerId === gg.playerId);
+    gg.pendingMpWager = own && own.pts > 0 ? { round: payload.round, pts: own.pts } : null;
+  } else {
+    gg.pendingMpWager = null;
+  }
+
   drawMpResultsScreen(payload);
 }
 
@@ -1655,6 +1727,14 @@ function drawMpResultsScreen(payload) {
       <strong style="margin-left:8px;">${payload.answer.countryHint}</strong>
     </div>
     ${modeExtraHtml}
+    ${gg.pendingMpWager && gg.pendingMpWager.round === payload.round ? `
+    <div class="gg-wager-panel" id="ggMpWagerPanel" style="margin-top:10px;">
+      <p class="small">🎰 Gokmodus: incasseer je ${gg.pendingMpWager.pts} pts veilig, of waag ze bij het rad voor een kans op meer — of alles kwijt. Alleen jouw punten, niet die van anderen.</p>
+      <div class="gg-wager-actions">
+        <button class="btn" onclick="ggMpBankPoints()">✅ Veilig incasseren (+${gg.pendingMpWager.pts})</button>
+        <button class="btn primary" onclick="ggMpOpenWager()">🎰 Waag ze bij het rad</button>
+      </div>
+    </div>` : ""}
     <div class="guesslist" style="margin-top:10px;">
       ${sorted.map((g, i) => {
         const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
@@ -1666,8 +1746,8 @@ function drawMpResultsScreen(payload) {
       }).join("")}
     </div>
     <div class="small" style="margin:10px 0 4px;">Totaalscore</div>
-    <div class="guesslist">
-      ${Object.values(payload.scoreboard).sort((a,b) => b.total - a.total)
+    <div class="guesslist" id="ggMpTotalScoreList">
+      ${Object.values(gg.scoreboard).sort((a,b) => b.total - a.total)
         .map(s => `<div class="gitem">
           <div class="name">${s.name}</div>
           <div></div><div></div><div class="prox">${s.total} pts</div>
@@ -1739,12 +1819,26 @@ function onMpGameOver(payload) {
   gg.screen = "gameover";
   gg.lastGameOverPayload = payload;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
+  document.getElementById("ggWagerOverlay")?.remove();
+
+  // Spel afgelopen terwijl je nog niet had gekozen om je laatste ronde-punten
+  // te incasseren of te wagen? Schrijf ze veilig bij, zodat ze niet
+  // verdwijnen. payload.scoreboard is de laatste stand van de host, die dit
+  // (nog niet verstuurde) bedrag nog niet kent — dus lokaal erbij optellen
+  // en alsnog naar de host sturen zodat iedereen dezelfde stand ziet.
   gg.scoreboard = payload.scoreboard;
+  if (gg.pendingMpWager) {
+    const pts = gg.pendingMpWager.pts;
+    gg.pendingMpWager = null;
+    if (!gg.scoreboard[gg.playerId]) gg.scoreboard[gg.playerId] = { name: gg.name, total: 0 };
+    gg.scoreboard[gg.playerId].total += pts;
+    gg.room.send("wager", { round: gg.round, playerId: gg.playerId, name: gg.name, delta: pts });
+  }
   if (payload.hp) gg.hp = payload.hp;
   if (payload.teamScore) gg.teamScore = payload.teamScore;
   if (payload.alive) gg.alive = new Set(payload.alive);
   if (payload.eliminated) gg.eliminated = payload.eliminated;
-  const sorted = Object.values(payload.scoreboard).sort((a, b) => b.total - a.total);
+  const sorted = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total);
 
   let winnerText = sorted[0] ? sorted[0].name + " wint!" : "Klaar!";
   let extraWinnerHtml = "";
@@ -1788,6 +1882,7 @@ function onMpGameOver(payload) {
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
       ${locationSettingHtml("restart", gg.locationSet)}
+      ${difficultySettingHtml("restart", gg.difficulty, gg.blackwhite)}
       ${timerSettingHtml("restart", gg.roundTime)}
     </div>` : `<div class="card" style="cursor:default; margin-top:14px; text-align:center;">
       <div class="small">Wachten tot de host een nieuw spel start...</div>
@@ -1806,6 +1901,7 @@ function onMpGameOver(payload) {
       btn.classList.add("active");
     });
     wireLocationSetting("restart");
+    wireDifficultySetting("restart");
     wireTimerSetting("restart");
   }
 }
@@ -1816,9 +1912,11 @@ window.ggMpRestartGame = function () {
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : gg.rounds;
   const locSet = readLocationSetting("restart");
   const roundTime = readTimerSetting("restart");
+  const { difficulty, blackwhite } = readDifficultySetting("restart");
   gg.rounds = rounds; gg.locationSet = locSet; gg.roundTime = roundTime; gg.pointFn = buildPointFn(locSet);
-  gg.room.send("restart", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode });
-  gg.room.send("settings", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode });
+  gg.difficulty = difficulty; gg.blackwhite = blackwhite;
+  gg.room.send("restart", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode, difficulty, blackwhite });
+  gg.room.send("settings", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode, difficulty, blackwhite });
   window.ggMpStartGame();
 };
 
@@ -1827,6 +1925,8 @@ function onMpRestart(payload) {
   gg.rounds = payload.rounds; gg.locationSet = payload.locationSet;
   gg.roundTime = payload.roundTime ?? null;
   gg.gameMode = payload.gameMode ?? gg.gameMode;
+  gg.difficulty = payload.difficulty ?? "free";
+  gg.blackwhite = payload.blackwhite ?? false;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
@@ -2051,6 +2151,138 @@ window.ggResolveWager = function () {
   const nextBtn = document.getElementById("ggNextRoundBtn");
   if (nextBtn) nextBtn.style.display = "";
 };
+
+// ---------- Gokmodus in multiplayer: zelfde idee, maar de uitkomst gaat via
+// de host naar het gedeelde scorebord (elke speler waagt alleen zijn eigen
+// punten — nooit die van een ander). ----------
+
+// Host-only: verwerkt de definitieve uitkomst van een speler die zijn
+// ronde-punten heeft ingecasseerd of gewaagd, telt 'm bij het scorebord op
+// en stuurt de bijgewerkte stand naar iedereen door.
+function onMpWagerReceived(payload) {
+  if (!gg.isHost) return;
+  if (!gg.scoreboard[payload.playerId]) gg.scoreboard[payload.playerId] = { name: payload.name || "Speler", total: 0 };
+  gg.scoreboard[payload.playerId].total += payload.delta;
+  gg.room.send("scoreupdate", { scoreboard: gg.scoreboard });
+}
+
+// Iedereen (inclusief de host zelf) ontvangt de bijgewerkte stand en werkt
+// de zichtbare totaalscore-lijst op het resultatenscherm live bij, zonder
+// een eventueel open gokpaneel/rad van een andere speler te verstoren.
+function onMpScoreUpdateReceived(payload) {
+  gg.scoreboard = payload.scoreboard;
+  if (gg.screen !== "results") return;
+  const list = document.getElementById("ggMpTotalScoreList");
+  if (!list) return;
+  list.innerHTML = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total)
+    .map((s) => `<div class="gitem"><div class="name">${s.name}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
+    .join("");
+}
+
+// Stuurt het eindresultaat van je eigen gok (incasseren of gokuitslag) naar
+// de host, en werkt je eigen scorebord alvast optimistisch bij zodat het
+// niet knippert terwijl het antwoord van de host onderweg is.
+function ggMpSendWagerResult(delta) {
+  if (!gg.scoreboard[gg.playerId]) gg.scoreboard[gg.playerId] = { name: gg.name, total: 0 };
+  gg.scoreboard[gg.playerId].total += delta;
+  gg.room.send("wager", { round: gg.round, playerId: gg.playerId, name: gg.name, delta });
+  const list = document.getElementById("ggMpTotalScoreList");
+  if (list) {
+    list.innerHTML = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total)
+      .map((s) => `<div class="gitem"><div class="name">${s.name}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
+      .join("");
+  }
+}
+
+window.ggMpBankPoints = function () {
+  if (!gg.pendingMpWager) return;
+  const pts = gg.pendingMpWager.pts;
+  gg.pendingMpWager = null;
+  document.getElementById("ggMpWagerPanel")?.remove();
+  ggMpSendWagerResult(pts);
+};
+
+window.ggMpOpenWager = function () {
+  if (!gg.pendingMpWager || document.getElementById("ggWagerOverlay")) return;
+  const pts = gg.pendingMpWager.pts;
+  const overlay = document.createElement("div");
+  overlay.id = "ggWagerOverlay";
+  overlay.className = "gg-roulette-overlay";
+  overlay.innerHTML = `
+    <div class="gg-roulette-modal">
+      <h3>🎰 Waag je ${pts} pts</h3>
+      <p class="small">Rood of zwart geraden = ×2. Groen (0) geraden = ×5, maar kleine kans. Mis = deze ronde 0 pts.</p>
+      <div class="gg-roulette-number" id="ggWagerNumber">?</div>
+      <div class="gg-roulette-colors" id="ggWagerColors">
+        <button class="gg-roulette-color-btn gg-roulette-red" data-c="red">Rood ×2</button>
+        <button class="gg-roulette-color-btn gg-roulette-black" data-c="black">Zwart ×2</button>
+        <button class="gg-roulette-color-btn gg-roulette-green" data-c="green">Groen ×5</button>
+      </div>
+      <div class="gg-roulette-actions" id="ggWagerActions">
+        <button class="btn" onclick="ggCancelWager()">Terug</button>
+        <button class="btn primary" id="ggWagerSpinBtn" disabled>🎡 Draai</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  let chosen = null;
+  overlay.querySelectorAll(".gg-roulette-color-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      overlay.querySelectorAll(".gg-roulette-color-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      chosen = btn.dataset.c;
+      document.getElementById("ggWagerSpinBtn").disabled = false;
+    });
+  });
+  document.getElementById("ggWagerSpinBtn").addEventListener("click", () => {
+    if (!chosen) return;
+    ggMpWagerSpin(chosen);
+  });
+};
+
+function ggMpWagerSpin(chosen) {
+  const overlay = document.getElementById("ggWagerOverlay");
+  if (!overlay || !gg.pendingMpWager) return;
+  const numberEl = document.getElementById("ggWagerNumber");
+  overlay.querySelectorAll("button").forEach((b) => b.disabled = true);
+
+  const pts = gg.pendingMpWager.pts;
+  gg.pendingMpWager = null;
+  document.getElementById("ggMpWagerPanel")?.remove();
+
+  let ticks = 0;
+  const spinTimer = setInterval(() => {
+    const n = Math.floor(Math.random() * 37);
+    numberEl.textContent = n;
+    numberEl.className = `gg-roulette-number gg-roulette-${rouletteColor(n)}`;
+    ticks++;
+    if (ticks > 16) {
+      clearInterval(spinTimer);
+      const finalN = Math.floor(Math.random() * 37);
+      const finalColor = rouletteColor(finalN);
+      numberEl.textContent = finalN;
+      numberEl.className = `gg-roulette-number gg-roulette-${finalColor}`;
+      const won = finalColor === chosen;
+      const mult = chosen === "green" ? 5 : 2;
+      const payout = won ? pts * mult : 0;
+      ggMpSendWagerResult(payout);
+      ggMpWagerShowResult(won, payout, mult);
+    }
+  }, 80);
+}
+
+function ggMpWagerShowResult(won, payout, mult) {
+  const overlay = document.getElementById("ggWagerOverlay");
+  if (!overlay) return;
+  const actions = document.getElementById("ggWagerActions");
+  const modal = overlay.querySelector(".gg-roulette-modal");
+  const msg = document.createElement("p");
+  msg.className = won ? "msg good" : "msg bad";
+  msg.style.textAlign = "center";
+  msg.textContent = won ? `🎉 Geraakt (×${mult})! +${payout} pts` : "😢 Mis — deze ronde 0 pts.";
+  modal.insertBefore(msg, actions);
+  actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager()" style="width:100%;">Verder →</button>`;
+}
 
 function initMap(mapsApi) {
   const container = document.getElementById("ggGuessMap");
