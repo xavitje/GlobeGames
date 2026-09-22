@@ -88,8 +88,7 @@ export async function findStreetViewRound(
 
 export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
   const { noMove = false } = options;
-  const panorama = new maps.StreetViewPanorama(el, {
-    position: { lat, lng },
+  const panoOptions = {
     pano: pano || undefined,
     pov: { heading: Math.random() * 360, pitch: 0 },
     zoom: 0,
@@ -108,7 +107,13 @@ export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
     // pulls in extra high-res tiles and is a big part of the "laggy" feel.
     // Keeping the zoom fixed makes movement noticeably snappier.
     enableCloseUp: false,
-  });
+  };
+  // `position` is alleen nodig als fallback wanneer er geen pano-id is —
+  // met een pano-id (multiplayer-clients krijgen bewust alleen die, geen
+  // lat/lng, zie geoguesser.js) laadt Google de juiste panorama daar al
+  // rechtstreeks mee op.
+  if (pano == null && lat != null && lng != null) panoOptions.position = { lat, lng };
+  const panorama = new maps.StreetViewPanorama(el, panoOptions);
   if (!noMove) warmNeighboringPanoramas(maps, panorama);
   return panorama;
 }

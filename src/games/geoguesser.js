@@ -1243,7 +1243,11 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
           gg.roundStartPlayers.push(p);
           if (!gg.scoreboard[p.playerId]) gg.scoreboard[p.playerId] = { name: p.name, total: 0 };
         });
-        gg.room.send("round", { round: gg.round, total: gg.rounds, lat: gg.current.lat, lng: gg.current.lng, pano: gg.current.pano, countryHint: gg.current.countryHint });
+        // Alleen de pano-id gaat mee, niet de ruwe lat/lng: anders zou iedereen
+        // in de lobby het antwoord al in het Network-tabblad (WS-berichten) kunnen
+        // lezen voordat er gegokt is. Elke client zoekt de panorama zelf op via
+        // de pano-id (zie createPanorama in streetview.js).
+        gg.room.send("round", { round: gg.round, total: gg.rounds, pano: gg.current.pano, countryHint: gg.current.countryHint });
       }
     }
   });
@@ -1456,7 +1460,11 @@ function hideConnBanner() {
 function onMpResyncRequest() {
   if (!gg?.isHost) return;
   if (gg.screen === "round" && gg.current) {
-    gg.room.send("round", { round: gg.round, total: gg.rounds, lat: gg.current.lat, lng: gg.current.lng, pano: gg.current.pano, countryHint: gg.current.countryHint });
+    // Alleen de pano-id gaat mee, niet de ruwe lat/lng: anders zou iedereen
+        // in de lobby het antwoord al in het Network-tabblad (WS-berichten) kunnen
+        // lezen voordat er gegokt is. Elke client zoekt de panorama zelf op via
+        // de pano-id (zie createPanorama in streetview.js).
+        gg.room.send("round", { round: gg.round, total: gg.rounds, pano: gg.current.pano, countryHint: gg.current.countryHint });
   } else if (gg.screen === "results" && gg.lastResultsPayload) {
     gg.room.send("results", gg.lastResultsPayload);
   } else if (gg.screen === "gameover" && gg.lastGameOverPayload) {
@@ -1519,7 +1527,8 @@ async function hostAdvanceRound() {
   if (!round) { gg.round--; return hostAdvanceRound(); }
   gg.currentGuesses = {}; gg.finishingRound = false;
   gg.roundStartPlayers = gg.room.players();
-  gg.room.send("round", { round: gg.round, total: gg.rounds, lat: round.lat, lng: round.lng, pano: round.pano, countryHint: round.countryHint });
+  // Zie hierboven: bewust geen lat/lng mee, alleen de pano-id.
+  gg.room.send("round", { round: gg.round, total: gg.rounds, pano: round.pano, countryHint: round.countryHint });
 }
 
 function onMpRoundStart(payload) {
