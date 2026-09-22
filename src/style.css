@@ -1459,3 +1459,29 @@ a.linklike {
     white-space: nowrap;
   }
 }
+
+/* Advertentieblokken: klein, gecentreerd, altijd met een duidelijk label
+   erboven en een max-hoogte zodat een advertentie nooit de overhand neemt
+   op de pagina. */
+.ad-slot {
+  margin: 18px 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+.ad-slot::before {
+  content: "Advertentie";
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sub);
+  opacity: 0.7;
+}
+.ad-slot .adsbygoogle {
+  max-height: 280px;
+  width: 100%;
+}

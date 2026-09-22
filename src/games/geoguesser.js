@@ -13,6 +13,7 @@ import {
   randomPlayerId,
 } from "../lib/multiplayer.js";
 import { getProfile, saveProfile } from "../lib/profile.js";
+import { adSlotHtml, initAdSlots } from "../lib/ads.js";
 
 let app;
 let gg = null;
@@ -440,7 +441,9 @@ function drawStartScreen() {
       ${mpAvailable ? 'onclick="ggShowMultiplayerMenu()"' : ""}>
       <span class="icon">👥</span><h3>Met vrienden (multiplayer)</h3>
       <p>${mpAvailable ? "Maak een lobby of join er een met een code." : "Multiplayer niet ingesteld (Supabase-variabelen ontbreken)."}</p>
-    </div>`;
+    </div>
+    ${adSlotHtml("geoguesserSettings")}`;
+  initAdSlots();
 }
 
 // ---------- Solo settings ----------
@@ -468,10 +471,12 @@ window.ggShowSoloSettings = function (prefill = {}) {
         <input type="checkbox" id="soloBlackWhite" ${prefill.blackwhite ? "checked" : ""} /> Zwart-wit
       </label>
     </div>
+    ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
       <button class="btn" onclick="ggShowStart()">← Terug</button>
       <button class="btn primary" onclick="ggStartSolo()">Spelen →</button>
     </div>`;
+  initAdSlots();
   document.getElementById("soloRoundPills").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-v]"); if (!btn) return;
     document.querySelectorAll("#soloRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
@@ -608,12 +613,14 @@ function showSoloResultOverlay(km, pts) {
       <div class="gg-result-stat">${statLine}</div>
     </div>
     <div id="ggResultMap" class="gg-result-map"></div>
+    ${adSlotHtml("geoguesserResults")}
     <div class="gg-result-footer">
       <button class="btn primary" id="ggNextRoundBtn">
         ${gg.round < gg.rounds ? "Volgende ronde →" : "Bekijk eindscore"}
       </button>
     </div>`;
   wrap.appendChild(overlay);
+  initAdSlots();
 
   document.getElementById("ggNextRoundBtn").onclick = () => {
     if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
@@ -676,10 +683,12 @@ function showSoloFinalScore() {
         <div></div><div class="prox">${h.pts} pts</div>
       </div>`).join("")}
     </div>
+    ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
       <button class="btn" onclick="ggShowStart()">← Menu</button>
       <button class="btn primary" onclick="ggReplaySoloSettings()">🔄 Opnieuw spelen</button>
     </div>`;
+  initAdSlots();
 }
 
 window.ggReplaySoloSettings = function () {
@@ -795,7 +804,9 @@ function showStreakGameOver(guess) {
       <p class="small">${isNewBest ? "🎉 Nieuwe beste streak!" : `Beste streak: ${gg.best}`}</p>
       <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">Opnieuw</button>
     </div>
+    ${adSlotHtml("geoguesserResults")}
     <div class="footerrow"><button class="btn" onclick="ggShowStart()">← Menu</button><div></div></div>`;
+  initAdSlots();
 }
 
 // ---------- Daily challenge ----------
@@ -834,7 +845,9 @@ function showDailyResult(result) {
         <div></div><div class="prox">${h.pts} pts</div>
       </div>`).join("")}
     </div>
+    ${adSlotHtml("geoguesserResults")}
     <div class="footerrow"><button class="btn" onclick="ggShowStart()">← Menu</button><div></div></div>`;
+  initAdSlots();
   const copyBtn = document.getElementById("ggDailyCopyBtn");
   if (copyBtn) {
     copyBtn.onclick = () => {
@@ -887,10 +900,12 @@ window.ggShowMpHostSettings = function (prefill = {}) {
       ${locationSettingHtml("mp", prefill.locationSet)}
       ${timerSettingHtml("mp", prefill.roundTime || null)}
     </div>
+    ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
       <button class="btn" onclick="ggShowMultiplayerMenu()">← Terug</button>
       <button class="btn primary" onclick="ggHostLobby()">Kamer aanmaken →</button>
     </div>`;
+  initAdSlots();
   document.getElementById("mpRoundPills").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-v]"); if (!btn) return;
     document.querySelectorAll("#mpRoundPills .gg-pill-btn").forEach(b => b.classList.remove("active"));
@@ -918,9 +933,11 @@ window.ggShowMpJoin = function (prefill = {}) {
       </div>
       <button class="btn primary" id="ggJoinBtn" style="margin-top:20px; width:100%;">Join</button>
     </div>
+    ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
       <button class="btn" onclick="ggShowMultiplayerMenu()">← Terug</button><div></div>
     </div>`;
+  initAdSlots();
 
   const boxes = Array.from(document.querySelectorAll(".gg-code-box"));
   boxes.forEach((box, i) => {
@@ -1177,11 +1194,13 @@ function drawLobbyWaiting() {
       </div>`).join("")}
     </div>
     ${gg.isHost && !canStart.ok ? `<div class="small" style="color:var(--danger); margin-top:8px; text-align:center;">${canStart.reason}</div>` : ""}
+    ${adSlotHtml("geoguesserLobby")}
     <div class="footerrow">
       <button class="btn" onclick="ggLeaveLobby()">← Lobby verlaten</button>
       ${gg.isHost ? `<button class="btn" onclick="ggBackToHostSettings()">⚙️ Instellingen</button>` : ""}
       ${gg.isHost ? `<button class="btn primary" ${canStart.ok ? "" : "disabled"} onclick="ggMpStartGame()">Start spel →</button>` : "<div></div>"}
     </div>`;
+  initAdSlots();
 }
 
 window.ggCopyLink = function () {
@@ -1581,12 +1600,14 @@ function drawMpResultsScreen(payload) {
           <div></div><div></div><div class="prox">${s.total} pts</div>
         </div>`).join("")}
     </div>
+    ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
       <div></div>
       ${gg.isHost
         ? `<button class="btn primary" onclick="ggMpNextFromHost()">${isLast ? "Bekijk eindscore" : "Volgende ronde →"}</button>`
         : `<div class="small">Wachten op host...</div>`}
     </div>`;
+  initAdSlots();
 
   // Draw Google Maps result map
   setTimeout(() => {
@@ -1698,10 +1719,12 @@ function onMpGameOver(payload) {
     </div>` : `<div class="card" style="cursor:default; margin-top:14px; text-align:center;">
       <div class="small">Wachten tot de host een nieuw spel start...</div>
     </div>`}
+    ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
       <button class="btn" onclick="ggLeaveLobby()">← Menu</button>
       ${gg.isHost ? '<button class="btn primary" onclick="ggMpRestartGame()">🔄 Nieuw spel in zelfde lobby</button>' : "<div></div>"}
     </div>`;
+  initAdSlots();
 
   if (gg.isHost) {
     document.getElementById("restartRoundPills").addEventListener("click", (e) => {

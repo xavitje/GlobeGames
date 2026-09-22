@@ -5,6 +5,7 @@ import { renderSilhouette } from "./games/silhouette.js";
 import { renderGlobleGame } from "./games/globle.js";
 import { renderGeoGuesser } from "./games/geoguesser.js";
 import { ensureProfileWidget } from "./lib/profile.js";
+import { adSlotHtml, initAdSlots } from "./lib/ads.js";
 
 const app = document.getElementById("app");
 
@@ -53,8 +54,10 @@ function renderRoute() {
         <p>Een echte straatfoto verschijnt — plaats je pin op de kaart en zie hoe dichtbij je zat. 5 rondes, net als het origineel.</p>
       </div>
     </div>
+    ${adSlotHtml("hubFooter")}
   `;
   }
+  initAdSlots();
 }
 
 window.go = function (view) {
