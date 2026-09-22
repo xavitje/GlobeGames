@@ -10,13 +10,13 @@ const AD_CLIENT = "ca-pub-9333149556787565";
 // bijbehorende eenheid is aangemaakt in AdSense (Advertenties > Op
 // advertenties gebaseerde eenheid > Display-advertenties > Responsief).
 const AD_SLOTS = {
-  hubFooter: null, // Hub - footer
-  geohuntBoard: null, // GeoHunt - onder raster / na afloop
-  silhouetteList: null, // VormRaden - onder gokkenlijst
-  globleEnd: null, // GlobeGuess - eindscherm
-  geoguesserSettings: null, // GeoGuesser - start-/instellingenscherm
-  geoguesserResults: null, // GeoGuesser - resultaten/eindscherm
-  geoguesserLobby: null, // GeoGuesser - lobby-wachtscherm
+  hubFooter: "4584376671", // Hub - footer
+  geohuntBoard: "5501961816", // GeoHunt - onder raster / na afloop
+  silhouetteList: "7224263716", // VormRaden - onder gokkenlijst
+  globleEnd: "9630935201", // GlobeGuess - eindscherm
+  geoguesserSettings: "7789124517", // GeoGuesser - start-/instellingenscherm
+  geoguesserResults: "5079200691", // GeoGuesser - resultaten/eindscherm
+  geoguesserLobby: "2640739610", // GeoGuesser - lobby-wachtscherm
 };
 
 // Geeft de HTML voor een advertentieblok terug voor de gegeven plek, of een
