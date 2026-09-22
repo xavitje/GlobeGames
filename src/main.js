@@ -79,3 +79,14 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
   }
 });
+
+// Zorgt ervoor dat de game bevriest als iemand via het Chrome-menu tóch DevTools opent
+setInterval(() => {
+  const before = new Date().getTime();
+  debugger;
+  const after = new Date().getTime();
+  if (after - before > 100) {
+    // DevTools is open
+    document.body.innerHTML = "<h1 style='color:red;text-align:center;margin-top:20%'>Cheating is niet toegestaan! Sluit de developer tools en herlaad de pagina.</h1>";
+  }
+}, 1000);

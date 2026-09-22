@@ -37,15 +37,15 @@ function sleep(ms) {
 // (courtyards, building interiors Google mislabels as outdoor, private
 // driveways, etc.) where the player can't move and has no clues at all.
 export async function findNearbyPanorama(maps, lat, lng, { minLinks = 3 } = {}) {
-  // Voeg een kleine willekeurige offset (jitter) toe zodat we niet exact op
-  // de stad- of gebouwmarker spawnen (verkleint kans op indoor spawns).
-  const jitterLat = (Math.random() - 0.5) * 0.05;
-  const jitterLng = (Math.random() - 0.5) * 0.05;
+  // Een hele kleine jitter (ongeveer 50-100 meter) om exact op de marker/indoor spawns te vermijden
+  const jitterLat = (Math.random() - 0.5) * 0.001;
+  const jitterLng = (Math.random() - 0.5) * 0.001;
   const searchLat = lat + jitterLat;
   const searchLng = lng + jitterLng;
 
   const sv = new maps.StreetViewService();
-  const radii = [5000, 20000, 50000];
+  // Kleinere radii zodat de API niet zo traag reageert (50m, 500m, 2000m)
+  const radii = [50, 500, 2000];
   for (const radius of radii) {
     const result = await new Promise((resolve) => {
       sv.getPanorama(
@@ -73,7 +73,7 @@ export async function findNearbyPanorama(maps, lat, lng, { minLinks = 3 } = {}) 
       );
     });
     if (result) return result;
-    await sleep(50);
+    await sleep(20);
   }
   return null;
 }

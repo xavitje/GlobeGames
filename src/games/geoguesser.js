@@ -2372,7 +2372,7 @@ window.ggUseSabotageMenu = function () {
   overlay.className = "gg-wager-overlay";
   overlay.id = "ggSabotageMenu";
 
-  const alivePlayers = [...gg.alive].filter(id => id !== gg.playerId);
+  const alivePlayers = Object.keys(gg.scoreboard).filter(id => id !== gg.playerId);
   if (alivePlayers.length === 0) {
     alert("Geen tegenstanders over om te saboteren!");
     return;
