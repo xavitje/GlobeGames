@@ -1,5 +1,5 @@
 import { GEO_POINTS, LOCATION_SETS } from "../data/geoPoints.js";
-import { ALL_NAMES, haversineKm, topbar, attachAutocomplete, candidateNames, findCountryByLoose } from "../core.js";
+import { ALL_NAMES, haversineKm, topbar, attachAutocomplete, candidateNames, findCountryByLoose, compassArrow } from "../core.js";
 import {
   hasGoogleMapsKey,
   loadGoogleMaps,
@@ -17,6 +17,33 @@ import { adSlotHtml, initAdSlots } from "../lib/ads.js";
 
 let app;
 let gg = null;
+
+// ---------- Geheime hint (alleen voor mij) ----------
+// Typ dit woord ergens tijdens een ronde (het maakt niet uit waar de focus
+// staat) om een piepklein, bijna onzichtbaar antwoordje in de hoek aan/uit
+// te zetten. Niemand anders komt hier per ongeluk achter.
+const GG_CHEAT_WORD = "xyzzy";
+let ggCheatBuffer = "";
+let ggCheatOn = false;
+window.addEventListener("keydown", (e) => {
+  if (!e.key || e.key.length !== 1 || !/[a-z]/i.test(e.key)) return;
+  ggCheatBuffer = (ggCheatBuffer + e.key.toLowerCase()).slice(-GG_CHEAT_WORD.length);
+  if (ggCheatBuffer === GG_CHEAT_WORD) {
+    ggCheatOn = !ggCheatOn;
+    ggCheatBuffer = "";
+    updateCheatHint();
+  }
+});
+function updateCheatHint() {
+  const wrap = document.getElementById("ggFullscreenWrap");
+  document.getElementById("ggCheatHint")?.remove();
+  if (!ggCheatOn || !wrap || !gg?.current?.countryHint) return;
+  const hint = document.createElement("div");
+  hint.id = "ggCheatHint";
+  hint.className = "gg-cheat-hint";
+  hint.textContent = gg.current.countryHint;
+  wrap.appendChild(hint);
+}
 
 const PLAYER_COLORS = [
   "#7c5cff", "#ff5c7c", "#ff9f2b", "#2bd6b4",
@@ -466,6 +493,7 @@ window.ggShowSoloSettings = function (prefill = {}) {
         <button class="gg-pill-btn${(prefill.difficulty || "free") === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
         <button class="gg-pill-btn${prefill.difficulty === "nomove" ? " active" : ""}" data-v="nomove">Niet bewegen</button>
         <button class="gg-pill-btn${prefill.difficulty === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
+        <button class="gg-pill-btn${prefill.difficulty === "gamble" ? " active" : ""}" data-v="gamble">🎰 Gokken</button>
       </div>
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
         <input type="checkbox" id="soloBlackWhite" ${prefill.blackwhite ? "checked" : ""} /> Zwart-wit
@@ -1827,7 +1855,7 @@ async function initPanorama(round) {
   const maps = await loadGoogleMaps();
   const el = document.getElementById("ggStreetView");
   if (!el) return;
-  const noMove = gg.difficulty === "nomove" || gg.difficulty === "nmpz";
+  const noMove = gg.difficulty === "nomove" || gg.difficulty === "nmpz" || gg.difficulty === "gamble";
   gg.panorama = createPanorama(maps, el, round, { noMove });
   el.classList.toggle("gg-grayscale", !!gg.blackwhite);
 
@@ -1851,7 +1879,130 @@ async function initPanorama(round) {
   maps.event.addListenerOnce(gg.panorama, "pano_changed", hideLoading);
   // Safety net in case neither event fires for some reason.
   setTimeout(hideLoading, 4000);
+
+  if (gg.difficulty === "gamble") initGambleNav(maps);
+  updateCheatHint();
 }
+
+// ---------- Gokmodus: eerst een potje roulette winnen om te mogen bewegen ----------
+
+const ROULETTE_RED = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+function rouletteColor(n) {
+  if (n === 0) return "green";
+  return ROULETTE_RED.has(n) ? "red" : "black";
+}
+
+let ggGambleLinksListener = null;
+
+function initGambleNav(maps) {
+  renderGambleNav(gg.panorama.getLinks() || []);
+  if (ggGambleLinksListener) maps.event.removeListener(ggGambleLinksListener);
+  ggGambleLinksListener = maps.event.addListener(gg.panorama, "links_changed", () => {
+    renderGambleNav(gg.panorama.getLinks() || []);
+  });
+}
+
+function renderGambleNav(links) {
+  const wrap = document.getElementById("ggFullscreenWrap");
+  if (!wrap) return;
+  document.getElementById("ggGambleNav")?.remove();
+  const nav = document.createElement("div");
+  nav.id = "ggGambleNav";
+  nav.className = "gg-gamble-nav";
+  const usable = (links || []).filter((l) => l && l.pano);
+  nav.innerHTML = usable.length
+    ? usable.map((l) => `<button class="gg-gamble-nav-btn" onclick="ggGambleTryMove('${l.pano}')">${compassArrow(l.heading || 0)} Gok om te lopen</button>`).join("")
+    : `<span class="gg-gamble-nav-empty">Geen richting om heen te gaan vanaf hier.</span>`;
+  wrap.appendChild(nav);
+}
+
+window.ggGambleTryMove = function (pano) {
+  const wrap = document.getElementById("ggFullscreenWrap");
+  if (!wrap || document.getElementById("ggRouletteOverlay")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "ggRouletteOverlay";
+  overlay.className = "gg-roulette-overlay";
+  overlay.innerHTML = `
+    <div class="gg-roulette-modal">
+      <h3>🎰 Gokken om te bewegen</h3>
+      <p class="small">Kies rood of zwart. Win je, dan mag je die kant op lopen.</p>
+      <div class="gg-roulette-number" id="ggRouletteNumber">?</div>
+      <div class="gg-roulette-colors" id="ggRouletteColors">
+        <button class="gg-roulette-color-btn gg-roulette-red" data-c="red">Rood</button>
+        <button class="gg-roulette-color-btn gg-roulette-black" data-c="black">Zwart</button>
+      </div>
+      <div class="gg-roulette-actions" id="ggRouletteActions">
+        <button class="btn" onclick="ggRouletteClose()">Annuleren</button>
+        <button class="btn primary" id="ggRouletteSpinBtn" disabled>🎡 Draai</button>
+      </div>
+    </div>`;
+  wrap.appendChild(overlay);
+  overlay.dataset.pano = pano;
+
+  let chosen = null;
+  overlay.querySelectorAll(".gg-roulette-color-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      overlay.querySelectorAll(".gg-roulette-color-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      chosen = btn.dataset.c;
+      document.getElementById("ggRouletteSpinBtn").disabled = false;
+    });
+  });
+  document.getElementById("ggRouletteSpinBtn").addEventListener("click", () => {
+    if (!chosen) return;
+    ggRouletteSpin(chosen);
+  });
+};
+
+function ggRouletteSpin(chosen) {
+  const overlay = document.getElementById("ggRouletteOverlay");
+  if (!overlay) return;
+  const numberEl = document.getElementById("ggRouletteNumber");
+  document.getElementById("ggRouletteColors").querySelectorAll("button").forEach((b) => b.disabled = true);
+  document.getElementById("ggRouletteSpinBtn").disabled = true;
+
+  let ticks = 0;
+  const spinTimer = setInterval(() => {
+    const n = Math.floor(Math.random() * 37);
+    numberEl.textContent = n;
+    numberEl.className = `gg-roulette-number gg-roulette-${rouletteColor(n)}`;
+    ticks++;
+    if (ticks > 16) {
+      clearInterval(spinTimer);
+      const finalN = Math.floor(Math.random() * 37);
+      const finalColor = rouletteColor(finalN);
+      numberEl.textContent = finalN;
+      numberEl.className = `gg-roulette-number gg-roulette-${finalColor}`;
+      const won = finalColor === chosen;
+      ggRouletteShowResult(won, overlay.dataset.pano);
+    }
+  }, 80);
+}
+
+function ggRouletteShowResult(won, pano) {
+  const overlay = document.getElementById("ggRouletteOverlay");
+  if (!overlay) return;
+  const actions = document.getElementById("ggRouletteActions");
+  const modal = overlay.querySelector(".gg-roulette-modal");
+  const msg = document.createElement("p");
+  msg.className = won ? "msg good" : "msg bad";
+  msg.style.textAlign = "center";
+  msg.textContent = won ? "🎉 Gewonnen! Je mag lopen." : "😢 Helaas, deze keer niet.";
+  modal.insertBefore(msg, actions);
+  actions.innerHTML = won
+    ? `<button class="btn primary" onclick="ggRouletteClose()" style="width:100%;">Verder lopen →</button>`
+    : `<button class="btn" onclick="ggRouletteClose()">Sluiten</button><button class="btn primary" onclick="ggRouletteClose(); ggGambleTryMove('${pano}')">🔄 Nog een keer gokken</button>`;
+  if (won) {
+    setTimeout(() => {
+      document.getElementById("ggRouletteOverlay")?.remove();
+      if (gg?.panorama) gg.panorama.setPano(pano);
+    }, 900);
+  }
+}
+
+window.ggRouletteClose = function () {
+  document.getElementById("ggRouletteOverlay")?.remove();
+};
 
 function initMap(mapsApi) {
   const container = document.getElementById("ggGuessMap");
