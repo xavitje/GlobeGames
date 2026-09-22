@@ -1477,6 +1477,14 @@ function hideConnBanner() {
 // bij een laatkomer die de lobby binnenkomt.
 function onMpResyncRequest() {
   if (!gg?.isHost) return;
+  // Instellingen altijd meesturen, ongeacht het huidige scherm: een
+  // herverbonden speler krijgt na een refresh een gloednieuwe gg-state met
+  // de standaardinstellingen (difficulty "free", enz.) — zonder dit blijft
+  // bijvoorbeeld gokmodus ("gamble") na een refresh op "free" staan, waardoor
+  // het gok-paneel bij de resultaten nooit meer terugkomt, ook al klopt de
+  // rest van de rondestatus weer.
+  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite });
+  gg.room.send("teams", { teams: gg.teams });
   if (gg.screen === "round" && gg.current) {
     // Alleen de pano-id gaat mee, niet de ruwe lat/lng: anders zou iedereen
         // in de lobby het antwoord al in het Network-tabblad (WS-berichten) kunnen
@@ -1487,9 +1495,6 @@ function onMpResyncRequest() {
     gg.room.send("results", gg.lastResultsPayload);
   } else if (gg.screen === "gameover" && gg.lastGameOverPayload) {
     gg.room.send("gameover", gg.lastGameOverPayload);
-  } else if (gg.screen === "lobby") {
-    gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite });
-    gg.room.send("teams", { teams: gg.teams });
   }
 }
 
