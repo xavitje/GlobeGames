@@ -433,8 +433,17 @@ export function renderGeoGuesser(rootEl) {
   loadGoogleMaps().catch(() => {});
 
   const urlLobby = getLobbyFromUrl();
-  if (urlLobby && hasMultiplayerConfig()) { drawAutoJoinScreen(urlLobby); return; }
   const savedLobby = hasMultiplayerConfig() ? getLobbySession() : null;
+  
+  if (urlLobby && hasMultiplayerConfig()) {
+    if (savedLobby && savedLobby.code === urlLobby) {
+      drawReconnectPrompt(savedLobby);
+    } else {
+      drawAutoJoinScreen(urlLobby);
+    }
+    return;
+  }
+  
   if (savedLobby) { drawReconnectPrompt(savedLobby); return; }
   drawStartScreen();
 }
