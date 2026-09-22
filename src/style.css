@@ -1,20 +1,51 @@
 :root {
+  /* Kleur */
   --bg: #f4f5f7;
   --panel: #ffffff;
   --panel2: #eef0f3;
   --ink: #151821;
   --sub: #5b6270;
   --accent: #7c5cff;
-  --accent2: #22c1a4;
+  --accent-ink: #ffffff;
   --border: #dfe2e8;
-  --danger: #e5484d;
+  --danger: #c94a4a;
   --good: #1fa971;
+  --warn: #b8842c;
   --shadow: 0 2px 10px rgba(20, 22, 30, 0.06);
-  --radius: 16px;
+  --shadow-lg: 0 16px 40px rgba(20, 22, 30, 0.16);
+  /* Vaste (niet per thema wisselende) tinten voor tekst boven de donkere
+     HUD-chips die over een streetview-foto liggen — die achtergrond is
+     altijd donker, ongeacht licht/donker-thema van de site zelf. */
+  --good-tint: #7fe3b4;
+  --warn-tint: #f0c168;
+  --danger-tint: #ff9aa3;
+  /* Nog meer vaste (niet per thema wisselende) tinten: kaart-placeholder en
+     roulettewiel-vlakken liggen altijd op een donkere ondergrond. */
+  --map-bg: #1a2234;
+  --wheel-black: #202225;
+  --wheel-default: #55596b;
   --ocean-hi: #eaf4fb;
   --ocean-lo: #9fc6e0;
   --globe-land: #dfe4ea;
   --globe-land-stroke: #b9c0cc;
+
+  /* Hoek-schaal: nooit scherp. sm = inputs/knoppen, md = cards/panels,
+     lg = grote vlakken/modals, pill = volledig rond (badges/pill-knoppen). */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+  --radius: var(--radius-md); /* alias, bestaand gebruik blijft werken */
+
+  /* Spacing-schaal (4/8/12/16/20/24/32/48) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -24,11 +55,13 @@
     --ink: #f1f2f6;
     --sub: #9198ab;
     --accent: #8f7bff;
-    --accent2: #2bd6b4;
+    --accent-ink: #14121f;
     --border: #2b2f3d;
-    --danger: #ff6b6f;
+    --danger: #e08585;
     --good: #3ddc97;
+    --warn: #dcab5f;
     --shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.5);
     --ocean-hi: #28405a;
     --ocean-lo: #0f1c2b;
     --globe-land: #3a4256;
@@ -42,11 +75,13 @@
   --ink: #f1f2f6;
   --sub: #9198ab;
   --accent: #8f7bff;
-  --accent2: #2bd6b4;
+  --accent-ink: #14121f;
   --border: #2b2f3d;
-  --danger: #ff6b6f;
+  --danger: #e08585;
   --good: #3ddc97;
+  --warn: #dcab5f;
   --shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.5);
   --ocean-hi: #28405a;
   --ocean-lo: #0f1c2b;
   --globe-land: #3a4256;
@@ -78,54 +113,82 @@ body {
 code {
   font-family: ui-monospace, monospace;
 }
+
+/* ---------- Iconen (geen emoji's) ---------- */
+.icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  vertical-align: -0.2em;
+}
+.icon-sm {
+  width: 14px;
+  height: 14px;
+}
+.icon-lg {
+  width: 34px;
+  height: 34px;
+}
+.icon-xl {
+  width: 44px;
+  height: 44px;
+}
+.compass-arrow {
+  transition: transform 0.2s ease;
+}
+
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 22px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
   flex-wrap: wrap;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   cursor: pointer;
   user-select: none;
 }
-.brand .logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+.brand-mark {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
+  color: var(--accent);
+}
+.brand-mark .icon {
+  width: 26px;
+  height: 26px;
 }
 .brand h1 {
-  font-size: 20px;
+  font-size: 19px;
+  font-weight: 700;
   margin: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 .brand h1 span {
   color: var(--accent);
+  font-weight: 600;
 }
 .navbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--ink);
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
   cursor: pointer;
   font-weight: 600;
 }
 .navbtn:hover {
   border-color: var(--accent);
+  color: var(--accent);
 }
 .hero {
-  margin-bottom: 26px;
+  margin-bottom: var(--space-6);
 }
 .hero h2 {
   font-size: 26px;
@@ -142,13 +205,13 @@ code {
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
 }
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
+  border-radius: var(--radius-md);
+  padding: var(--space-6);
   cursor: pointer;
   box-shadow: var(--shadow);
   transition:
@@ -162,13 +225,14 @@ code {
   border-color: var(--accent);
 }
 .card .icon {
-  font-size: 34px;
-  margin-bottom: 10px;
   display: block;
+  margin-bottom: var(--space-3);
+  color: var(--accent);
 }
 .card h3 {
   margin: 0 0 6px;
   font-size: 17px;
+  font-weight: 700;
 }
 .card p {
   margin: 0;
@@ -178,15 +242,15 @@ code {
 }
 .card .tag {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: var(--space-3);
+  right: var(--space-3);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   background: var(--panel2);
   color: var(--sub);
   padding: 3px 8px;
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   font-weight: 700;
 }
 .gametitle {
@@ -246,7 +310,7 @@ code {
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--ink);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 12px 14px;
   font-size: 14.5px;
   outline: 0;
@@ -256,10 +320,10 @@ code {
 }
 .inputrow button {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   border: none;
   padding: 0 20px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   font-weight: 700;
   cursor: pointer;
   font-size: 14px;
@@ -275,7 +339,7 @@ code {
   right: 70px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   margin-top: 4px;
   max-height: 220px;
   overflow-y: auto;
@@ -318,7 +382,7 @@ code {
 }
 .gcell {
   background: var(--panel2);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 8px;
   min-height: 96px;
   display: flex;
@@ -376,7 +440,7 @@ code {
   color: var(--good);
   background: rgba(34, 193, 164, 0.12);
   padding: 2px 7px;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
 }
 .gcell .pts.rare::before {
   content: "✦ ";
@@ -392,7 +456,7 @@ code {
 .scorebox {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 18px;
   font-weight: 800;
 }
@@ -411,14 +475,14 @@ code {
   border: 1px solid var(--border);
   color: var(--ink);
   padding: 10px 16px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   font-weight: 700;
   cursor: pointer;
   font-size: 13.5px;
 }
 .btn.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   border: none;
 }
 .overlay {
@@ -433,7 +497,7 @@ code {
 }
 .overlaybox {
   background: var(--panel);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   padding: 28px;
   max-width: 360px;
   text-align: center;
@@ -486,7 +550,7 @@ code {
   gap: 10px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 9px 14px;
   font-size: 13.5px;
 }
@@ -641,7 +705,7 @@ code {
   max-width: 92vw;
   background: rgba(15, 16, 22, 0.88);
   border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   backdrop-filter: blur(7px);
   -webkit-backdrop-filter: blur(7px);
   box-shadow: 0 8px 32px rgba(0,0,0,0.55);
@@ -700,7 +764,7 @@ code {
   white-space: nowrap;
 }
 .gg-hud-score {
-  color: #a8f0d0;
+  color: var(--good-tint);
 }
 .gg-hud-force {
   cursor: pointer;
@@ -709,10 +773,10 @@ code {
   margin-left: auto;
 }
 .gg-hud-timer {
-  color: #ffd86b;
+  color: var(--warn-tint);
 }
 .gg-hud-timer-low {
-  color: #ff5c7c;
+  color: var(--danger-tint);
   animation: gg-timer-pulse 1s ease-in-out infinite;
 }
 @keyframes gg-timer-pulse {
@@ -729,7 +793,7 @@ code {
   width: 310px;
   background: rgba(15, 16, 22, 0.88);
   border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   /* Lower blur radius: a lot cheaper to composite (matters more when GPU
      compositing is unavailable and it falls back to software), with barely
      a visible difference here. */
@@ -791,7 +855,7 @@ code {
   width: 100%;
   height: 210px;
   cursor: crosshair;
-  background: #1a2234;
+  background: var(--map-bg);
   transition: height 0.3s cubic-bezier(0.4,0,0.2,1);
 }
 .gg-map-corner:hover .gg-guess-map,
@@ -826,7 +890,7 @@ code {
 }
 .gg-map-type-toggle button.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 
 .gg-map-footer {
@@ -839,7 +903,7 @@ code {
   width: 100%;
   padding: 11px;
   font-size: 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
 }
 .gg-submit-btn:disabled {
   opacity: 0.45;
@@ -878,7 +942,7 @@ code {
 .gg-pill-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 .gg-select-wrap {
   position: relative;
@@ -896,7 +960,7 @@ code {
 .gg-select {
   width: 100%;
   padding: 10px 36px 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--panel2);
   color: var(--ink);
@@ -940,7 +1004,7 @@ code {
 .gg-result-map {
   flex: 1;
   min-height: 0;
-  background: #1a2234;
+  background: var(--map-bg);
 }
 .gg-result-footer {
   padding: 12px 20px 18px;
@@ -986,7 +1050,7 @@ code {
   background: var(--panel2);
   border: 1px solid var(--border);
   color: var(--sub);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   font-size: 12px;
   outline: none;
@@ -1016,7 +1080,7 @@ a.linklike {
 .gg-team-col {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1077,7 +1141,7 @@ a.linklike {
   inset: 0;
   width: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #ff5f6d, #ffc371);
+  background: linear-gradient(90deg, var(--danger), var(--warn));
   transition: width 0.4s ease;
 }
 
@@ -1095,14 +1159,14 @@ a.linklike {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--panel2);
   color: inherit;
 }
 .gg-code-box:focus {
   outline: none;
-  border-color: var(--accent, #7c5cff);
+  border-color: var(--accent);
 }
 
 /* ---------- Multiplayer: chat-widget (blijft over scherm-wissels heen) ---------- */
@@ -1133,7 +1197,7 @@ a.linklike {
   position: absolute;
   top: -4px;
   right: -4px;
-  background: #ff5c7c;
+  background: var(--danger);
   color: #fff;
   font-size: 11px;
   font-weight: 800;
@@ -1155,7 +1219,7 @@ a.linklike {
   max-height: 60vh;
   background: rgba(15,16,22,0.94);
   border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 16px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: 0 12px 36px rgba(0,0,0,0.5);
 }
@@ -1201,7 +1265,7 @@ a.linklike {
   opacity: 0.85;
 }
 .gg-chat-msg.me .gg-chat-name {
-  color: #7c5cff;
+  color: var(--accent);
 }
 .gg-chat-form {
   display: flex;
@@ -1212,18 +1276,18 @@ a.linklike {
 .gg-chat-form input {
   flex: 1;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--panel2);
   color: inherit;
   font-size: 13px;
 }
 .gg-chat-send {
-  background: #7c5cff;
+  background: var(--accent);
   border: none;
   color: #fff;
   width: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
 }
@@ -1248,7 +1312,7 @@ a.linklike {
 .gg-hud-reroll {
   cursor: pointer;
   border: 1px solid rgba(255, 216, 107, 0.4);
-  color: #ffd86b;
+  color: var(--warn-tint);
   transition: background 0.15s;
 }
 .gg-hud-reroll:hover {
@@ -1413,7 +1477,7 @@ a.linklike {
 .gg-profile-modal input[type="text"] {
   width: 100%;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--panel2);
   color: var(--ink);
@@ -1464,14 +1528,15 @@ a.linklike {
    erboven en een max-hoogte zodat een advertentie nooit de overhand neemt
    op de pagina. */
 .ad-slot {
-  margin: 18px 0;
-  padding: 8px;
+  margin: var(--space-5) 0;
+  padding: var(--space-2);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   max-width: 100%;
   overflow: hidden;
+  border-radius: var(--radius-sm);
 }
 .ad-slot::before {
   content: "Advertentie";
@@ -1546,12 +1611,12 @@ a.linklike {
   font-size: 28px;
   font-weight: 800;
   color: #fff;
-  background: #555;
+  background: var(--wheel-default);
   border: 3px solid rgba(255,255,255,0.25);
 }
-.gg-roulette-number.gg-roulette-red { background: #d13b3b; }
-.gg-roulette-number.gg-roulette-black { background: #202225; }
-.gg-roulette-number.gg-roulette-green { background: #1fa971; }
+.gg-roulette-number.gg-roulette-red { background: var(--danger); }
+.gg-roulette-number.gg-roulette-black { background: var(--wheel-black); }
+.gg-roulette-number.gg-roulette-green { background: var(--good); }
 .gg-roulette-colors {
   display: flex;
   gap: 10px;
@@ -1562,15 +1627,15 @@ a.linklike {
   flex: 1;
   max-width: 130px;
   padding: 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 2px solid transparent;
   color: #fff;
   font-weight: 700;
   cursor: pointer;
 }
-.gg-roulette-color-btn.gg-roulette-red { background: #d13b3b; }
-.gg-roulette-color-btn.gg-roulette-black { background: #202225; }
-.gg-roulette-color-btn.gg-roulette-green { background: #1fa971; }
+.gg-roulette-color-btn.gg-roulette-red { background: var(--danger); }
+.gg-roulette-color-btn.gg-roulette-black { background: var(--wheel-black); }
+.gg-roulette-color-btn.gg-roulette-green { background: var(--good); }
 .gg-roulette-color-btn.active { border-color: var(--accent); }
 .gg-roulette-color-btn:disabled { opacity: 0.6; cursor: default; }
 .gg-roulette-actions {
@@ -1599,7 +1664,7 @@ a.linklike {
   background: rgba(0,0,0,0.7);
   border: 1px solid rgba(255,255,255,0.25);
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   pointer-events: none;
   user-select: none;
 }

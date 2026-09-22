@@ -1,8 +1,10 @@
 // Klein lokaal profiel: alleen in deze browser onthouden (localStorage), geen login.
 // Zorgt dat je naam niet elke keer opnieuw hoeft te worden ingetypt bij multiplayer.
 
+import { PLAYER_COLORS } from "../core.js";
+
 const KEY = "gg_profile";
-const COLORS = ["#4f8ef7", "#f76b4f", "#4fd67a", "#f7c94f", "#a24ff7", "#f74fb8", "#4ff7e3", "#f78e4f"];
+const COLORS = PLAYER_COLORS;
 
 export function getProfile() {
   try {
