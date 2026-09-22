@@ -1009,7 +1009,7 @@ window.ggShowMpHostSettings = function (prefill = {}) {
       <div class="gg-select-wrap"><select id="mpGameMode" class="gg-select">${gameModeOptionsHtml(prefill.gameMode || "ffa")}</select></div>
       <label class="gg-label" style="margin-top:16px;">Aantal rondes</label>
       <div class="gg-pill-row" id="mpRoundPills">
-        ${[3,5,7,10].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n}</button>`).join("")}
+        ${[3,5,7,10,'∞'].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n === '∞' ? 'Tot dood' : n}</button>`).join("")}
       </div>
       <label class="gg-label" style="margin-top:16px;">Locaties</label>
       ${locationSettingHtml("mp", prefill.locationSet)}
@@ -1097,7 +1097,7 @@ function getMpSettings() {
   const roundBtn = document.querySelector("#mpRoundPills .gg-pill-btn.active");
   const { difficulty, blackwhite } = readDifficultySetting("mp");
   return {
-    rounds: roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5,
+    rounds: roundBtn ? (roundBtn.dataset.v === '∞' ? '∞' : parseInt(roundBtn.dataset.v, 10)) : 5,
     locationSet: readLocationSetting("mp"),
     roundTime: readTimerSetting("mp"),
     gameMode: document.getElementById("mpGameMode")?.value || "ffa",
@@ -1525,7 +1525,7 @@ window.ggMpStartGame = function () {
 
 async function hostAdvanceRound() {
   gg.round++;
-  const outOfRounds = gg.round > gg.rounds || gg.round > 15;
+  const outOfRounds = gg.rounds === '∞' ? false : gg.round > gg.rounds;
   const duelDecided = gg.gameMode === "duels" && gg.duelOver;
   const brDecided = gg.gameMode === "br" && gg.alive.size <= 1;
   if (outOfRounds || duelDecided || brDecided) {
@@ -1706,7 +1706,7 @@ function onMpResults(payload) {
 
 function drawMpResultsScreen(payload) {
   const sorted = [...payload.guesses].sort((a, b) => b.pts - a.pts);
-  const isLast = gg.round >= gg.rounds
+  const isLast = (gg.rounds !== '∞' && gg.round >= gg.rounds)
     || (gg.gameMode === "duels" && gg.duelOver)
     || (gg.gameMode === "br" && gg.alive.size <= 1);
 
