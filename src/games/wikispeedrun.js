@@ -274,7 +274,7 @@ window.wsShowSoloSetup = function () {
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("flag", { size: "sm" })} Solo instellen</h2><div class="desc">Kies een start- en eindartikel.</div></div></div>
-    <div class="card" style="cursor:default;">
+    <div class="card" style="cursor:default; overflow:visible;">
       ${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}
       ${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}
       <div id="wsSoloError" class="small" style="color:var(--danger); margin-top:10px; display:none;"></div>
@@ -498,7 +498,7 @@ function drawLobby() {
         <button class="btn" onclick="wsCopyLink()">${icon("clipboard", { size: "sm" })} Kopieer</button>
       </div>
     </div>
-    <div class="card" style="cursor:default; margin-top:12px;">
+    <div class="card" style="cursor:default; margin-top:12px; overflow:visible;">
       <h3 style="margin-bottom:10px;">${icon("flag", { size: "sm" })} Route</h3>
       ${ws.isHost
         ? `${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}`
