@@ -1768,6 +1768,47 @@ a.linklike {
   font-weight: 700;
   margin-bottom: 6px;
 }
+/* Hover-voorbeeld op elke blauwe link in het artikel (zoals Wikipedia's
+   eigen "paginavoorbeelden") — één gedeeld element, JS positioneert 'm bij
+   de gehoverde link. */
+.ws-link-preview {
+  position: fixed;
+  width: 320px;
+  max-width: 80vw;
+  max-height: 240px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  padding: var(--space-4);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  z-index: 700;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.ws-link-preview.ws-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.ws-link-preview-title {
+  font-weight: 700;
+  font-size: 15px;
+  font-family: "Linux Libertine", "Georgia", "Times", serif;
+  margin-bottom: 6px;
+}
+.ws-link-preview-body {
+  color: var(--sub);
+}
+@media (max-width: 720px) {
+  .ws-link-preview { display: none; }
+}
 .ws-trail-bar {
   position: fixed;
   top: 56px;

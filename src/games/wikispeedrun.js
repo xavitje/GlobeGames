@@ -32,8 +32,8 @@ async function fetchWikiPage(title) {
 }
 
 // Korte inleiding (alleen de eerste alinea's) van een artikel — gebruikt voor
-// de hover-info bij het doelartikel, zodat je weet waar je naar zoekt zonder
-// de hele pagina te hoeven laden.
+// de hover-info bij het doelartikel én voor de hover-previews op elke blauwe
+// link in het artikel (net als Wikipedia's eigen "paginavoorbeelden").
 async function fetchWikiIntro(title) {
   const url = `https://nl.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
   const res = await fetch(url);
@@ -41,6 +41,80 @@ async function fetchWikiIntro(title) {
   const page = Object.values(data.query?.pages || {})[0];
   if (!page || page.missing !== undefined) throw new Error("Artikel niet gevonden");
   return (page.extract || "").trim();
+}
+
+// ---------- Hover-preview op elke interne link ----------
+// Gecachet per titel zodat je bij het opnieuw hoveren over dezelfde link (of
+// een link naar een artikel dat al eens is opgezocht) niet steeds opnieuw
+// hoeft te wachten op de Wikipedia-API.
+const wsIntroCache = new Map();
+let wsPreviewTimer = null;
+let wsPreviewToken = 0;
+
+function ensureLinkPreviewEl() {
+  let el = document.getElementById("wsLinkPreview");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "wsLinkPreview";
+    el.className = "ws-link-preview";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function positionLinkPreview(el, anchorRect) {
+  const width = el.offsetWidth || 320;
+  const height = el.offsetHeight || 140;
+  let left = anchorRect.left;
+  let top = anchorRect.bottom + 8;
+  if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+  if (top + height > window.innerHeight - 12) top = anchorRect.top - height - 8;
+  el.style.left = `${Math.max(12, left)}px`;
+  el.style.top = `${Math.max(12, top)}px`;
+}
+
+function truncateIntro(text, max) {
+  if (text.length <= max) return text;
+  return text.slice(0, max).replace(/\s+\S*$/, "") + "…";
+}
+
+async function showLinkPreview(a, title) {
+  const myToken = ++wsPreviewToken;
+  const el = ensureLinkPreviewEl();
+  el.innerHTML = `<div class="ws-link-preview-title">${title}</div><div class="ws-link-preview-body">Laden...</div>`;
+  el.classList.add("ws-visible");
+  positionLinkPreview(el, a.getBoundingClientRect());
+
+  let text = wsIntroCache.get(title);
+  if (text === undefined) {
+    try {
+      text = await fetchWikiIntro(title);
+    } catch (e) {
+      text = null;
+    }
+    wsIntroCache.set(title, text);
+  }
+  if (myToken !== wsPreviewToken) return; // muis is inmiddels ergens anders
+
+  const body = el.querySelector(".ws-link-preview-body");
+  if (body) body.textContent = text ? truncateIntro(text, 420) : "Geen samenvatting beschikbaar.";
+  positionLinkPreview(el, a.getBoundingClientRect());
+}
+
+function hideLinkPreview() {
+  wsPreviewToken++; // annuleert een eventuele lopende fetch
+  document.getElementById("wsLinkPreview")?.classList.remove("ws-visible");
+}
+
+function attachLinkPreview(a, title) {
+  a.addEventListener("mouseenter", () => {
+    clearTimeout(wsPreviewTimer);
+    wsPreviewTimer = setTimeout(() => showLinkPreview(a, title), 250);
+  });
+  a.addEventListener("mouseleave", () => {
+    clearTimeout(wsPreviewTimer);
+    hideLinkPreview();
+  });
 }
 
 // ---------- Klein toastje (herbruikt dezelfde stijl als de cheat-toast) ----------
@@ -134,6 +208,8 @@ function teardown() {
   if (ws?.cleanupCheat) ws.cleanupCheat();
   if (ws?.timerInt) clearInterval(ws.timerInt);
   clearTimeout(syncTimer);
+  clearTimeout(wsPreviewTimer);
+  document.getElementById("wsLinkPreview")?.remove();
   window.removeEventListener("popstate", handleExternalNavigate);
 }
 function handleExternalNavigate() {
@@ -636,6 +712,7 @@ async function loadArticle(title) {
         const targetTitle = decodeURIComponent(href.replace("/wiki/", "")).replace(/_/g, " ").split("#")[0];
         a.href = "#";
         a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
+        attachLinkPreview(a, targetTitle);
       } else if (href && href.startsWith("#")) {
         // Anker binnen dezelfde pagina (inhoudsopgave, voetnoot-terugverwijzing)
         // — laat gewoon native scrollen, telt niet als klik in de race.
