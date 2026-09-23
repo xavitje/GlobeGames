@@ -741,6 +741,7 @@ window.wsHandleLinkClick = function (e, targetTitle) {
   const clicksEl = document.getElementById("wsClicks");
   if (clicksEl) clicksEl.textContent = ws.clicks;
   ws.history.push(targetTitle);
+  hideLinkPreview();
   loadArticle(targetTitle);
 };
 
