@@ -8,11 +8,31 @@ let syncTimer = null;
 
 // ---------- Wikipedia API ----------
 
+// Wikipedia's "willekeurig artikel" pikt uit ALLE artikelen — en een groot
+// deel daarvan zijn kale, bot-gegenereerde stubs (een dorpje van 3000
+// inwoners, een jaartal-lijstje) met bijna geen uitgaande links, waardoor de
+// speedrun onspeelbaar wordt. We vragen daarom een handvol willekeurige
+// artikelen tegelijk op en kiezen degene met de meeste tekst (in bytes) —
+// een grover maar prima werkende indicatie dat een artikel genoeg inhoud en
+// links heeft om mee te racen.
 async function fetchWikiRandom() {
-  const url = `https://nl.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=1&format=json&origin=*`;
+  const url = `https://nl.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=10&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
-  return data.query.random[0].title;
+  const titles = (data.query?.random || []).map((r) => r.title);
+  if (!titles.length) throw new Error("Geen willekeurig artikel gevonden");
+  if (titles.length === 1) return titles[0];
+
+  try {
+    const infoUrl = `https://nl.wikipedia.org/w/api.php?action=query&prop=info&titles=${encodeURIComponent(titles.join("|"))}&format=json&origin=*`;
+    const infoRes = await fetch(infoUrl);
+    const infoData = await infoRes.json();
+    const pages = Object.values(infoData.query?.pages || {});
+    pages.sort((a, b) => (b.length || 0) - (a.length || 0));
+    return (pages[0] && pages[0].title) || titles[0];
+  } catch (e) {
+    return titles[0];
+  }
 }
 
 async function fetchWikiSearch(query) {
@@ -662,6 +682,57 @@ function renderTrail() {
   bar.scrollLeft = bar.scrollWidth;
 }
 
+// Bouwt zelf een inhoudsopgave op basis van de h2/h3-kopjes in het artikel
+// (Wikipedia's parse-API levert die niet meer kant-en-klaar mee), en zet 'm
+// vóór de eerste sectiekop — precies waar Wikipedia 'm zelf ook toont.
+function buildTableOfContents(bodyEl) {
+  if (!bodyEl || bodyEl.querySelector(".toc, #toc")) return; // al aanwezig, niet dubbel opbouwen
+  const headings = Array.from(bodyEl.querySelectorAll("h2, h3"));
+  if (headings.length < 2) return; // te kort artikel, net als op Wikipedia zelf
+
+  const sections = [];
+  let current = null;
+  let h2Count = 0;
+  let h3Count = 0;
+  let usedIds = new Set();
+
+  const uniqueId = (base) => {
+    let id = base || "sectie";
+    let n = 2;
+    while (usedIds.has(id)) { id = `${base}_${n++}`; }
+    usedIds.add(id);
+    return id;
+  };
+
+  headings.forEach((h) => {
+    const text = (h.textContent || "").trim();
+    let id = h.id || h.querySelector("span[id]")?.id;
+    if (!id || usedIds.has(id)) id = uniqueId((text || "sectie").replace(/\s+/g, "_"));
+    else usedIds.add(id);
+    h.id = id;
+
+    if (h.tagName === "H2") {
+      h2Count++; h3Count = 0;
+      current = { id, number: String(h2Count), text, subs: [] };
+      sections.push(current);
+    } else {
+      h3Count++;
+      const sub = { id, number: `${h2Count || 1}.${h3Count}`, text };
+      if (current) current.subs.push(sub); else sections.push({ ...sub, subs: [] });
+    }
+  });
+
+  const renderItem = (item) => `
+    <li><a href="#${item.id}"><span class="tocnumber">${item.number}</span>${item.text}</a>
+      ${item.subs && item.subs.length ? `<ul>${item.subs.map(renderItem).join("")}</ul>` : ""}
+    </li>`;
+
+  const tocEl = document.createElement("div");
+  tocEl.className = "toc";
+  tocEl.innerHTML = `<div class="toctitle">Inhoud</div><ul>${sections.map(renderItem).join("")}</ul>`;
+  headings[0].insertAdjacentElement("beforebegin", tocEl);
+}
+
 window.wsHandleLinkClick = function (e, targetTitle) {
   e.preventDefault();
   if (ws.endTime) return; // al klaar
@@ -705,6 +776,12 @@ async function loadArticle(title) {
     // Wikipedia-pagina en werden hiervoor per ongeluk verwijderd.
     container.querySelectorAll(".navbox, .mw-editsection").forEach((el) => el.remove());
 
+    // Wikipedia's "parse"-API levert bij de moderne skin geen kant-en-klare
+    // inhoudsopgave meer mee in de HTML (die wordt tegenwoordig door
+    // Wikipedia's eigen frontend-JS opgebouwd, niet in de statische parse-
+    // output) — dus bouwen we er zelf een op basis van de kopjes.
+    buildTableOfContents(container.querySelector(".wiki-body"));
+
     // Interne links kapen zodat een klik een nieuwe ronde in het spel start i.p.v. een echte navigatie.
     container.querySelectorAll("a").forEach((a) => {
       const href = a.getAttribute("href");
@@ -716,12 +793,16 @@ async function loadArticle(title) {
       } else if (href && href.startsWith("#")) {
         // Anker binnen dezelfde pagina (inhoudsopgave, voetnoot-terugverwijzing)
         // — laat gewoon native scrollen, telt niet als klik in de race.
-      } else {
-        // Externe links of speciale namespaces (Bestand:, Categorie:) staan uit.
-        a.style.color = "inherit";
-        a.style.textDecoration = "none";
-        a.style.pointerEvents = "none";
-        a.onclick = (e) => e.preventDefault();
+      } else if (href) {
+        // Externe links en speciale namespaces (Bestand:, Categorie:) mogen
+        // best werken — een bronvermelding aanklikken helpt je toch niet
+        // richting het doelartikel — maar dan wel in een nieuw tabblad, zodat
+        // je lopende run niet verloren gaat. Relatieve Wikipedia-paden (zoals
+        // "/wiki/Bestand:...") wijzen anders naar ons eigen domein i.p.v.
+        // wikipedia.org, dus die maken we eerst absoluut.
+        a.href = href.startsWith("/") ? `https://nl.wikipedia.org${href}` : href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
       }
     });
   } catch (e) {
