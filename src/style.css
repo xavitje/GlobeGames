@@ -1721,9 +1721,91 @@ a.linklike {
   flex: 1;
   text-align: right;
 }
-.ws-sidebar {
+.ws-info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ws-info-icon {
+  display: inline-flex;
+  color: var(--sub);
+  cursor: pointer;
+}
+.ws-info-icon:hover {
+  color: var(--accent);
+}
+.ws-info-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 8px;
+  width: 320px;
+  max-width: 80vw;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  padding: var(--space-4);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  z-index: 600;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.ws-info-wrap:hover .ws-info-popover,
+.ws-info-wrap.ws-info-open .ws-info-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.ws-info-popover-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.ws-trail-bar {
   position: fixed;
   top: 56px;
+  left: 0;
+  right: 0;
+  height: 34px;
+  z-index: 490;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-5);
+  background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ws-trail-item {
+  color: var(--sub);
+  flex: 0 0 auto;
+}
+.ws-trail-item.ws-trail-current {
+  color: var(--ink);
+  font-weight: 700;
+}
+.ws-trail-sep {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--sub);
+  opacity: 0.6;
+}
+.ws-trail-sep .icon {
+  width: 12px;
+  height: 12px;
+}
+.ws-sidebar {
+  position: fixed;
+  top: 90px;
   right: 0;
   bottom: 0;
   width: 250px;
@@ -1752,14 +1834,22 @@ a.linklike {
   border-left-color: var(--good);
 }
 .ws-wiki-wrap {
-  margin-top: 56px;
-  padding: var(--space-6);
+  /* Fixed en los van #app's centered 960px-kolom, anders werd het artikel
+     samengeknepen tot een smalle strook met twee lege balken links/rechts
+     op elk breder scherm. */
+  position: fixed;
+  top: 90px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-7);
   background: #fff;
   color: #202122;
-  min-height: calc(100vh - 56px);
+  z-index: 350;
 }
 .ws-wiki-wrap.ws-with-sidebar {
-  margin-right: 250px;
+  right: 250px;
 }
 .ws-finish-card {
   text-align: center;
@@ -1788,15 +1878,123 @@ a.linklike {
 }
 @media (max-width: 720px) {
   .ws-sidebar { display: none; }
-  .ws-wiki-wrap.ws-with-sidebar { margin-right: 0; }
+  .ws-wiki-wrap.ws-with-sidebar { right: 0; }
 }
 
 .wiki-content {
   font-family: sans-serif;
   line-height: 1.6;
   font-size: 15px;
-  max-width: 900px;
+  max-width: 1150px;
   margin: 0 auto;
+}
+/* Infobox rechtsboven, TOC, referenties en tabellen kregen hiervoor geen
+   stijl (ze werden zelfs uit de pagina gesloopt) — dit zijn de basisregels
+   die Wikipedia's eigen site-CSS normaal levert, zodat een artikel er weer
+   als een echte Wikipedia-pagina uitziet in plaats van kale, ongestylede
+   tabellen. */
+.wiki-body::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+.wiki-body table.infobox {
+  float: right;
+  clear: right;
+  margin: 0 0 1em 1.4em;
+  width: 300px;
+  max-width: 100%;
+  border: 1px solid #a2a9b1;
+  border-spacing: 3px;
+  background: #f8f9fa;
+  color: #202122;
+  font-size: 88%;
+  line-height: 1.4em;
+}
+.wiki-body table.infobox caption {
+  font-weight: bold;
+  font-size: 125%;
+  padding: 0.3em;
+}
+.wiki-body table.infobox th,
+.wiki-body table.infobox td {
+  vertical-align: top;
+  padding: 0.25em 0.5em;
+}
+.wiki-body table.infobox th {
+  background: #eaecf0;
+  text-align: left;
+}
+.wiki-body table.infobox .infobox-image img {
+  display: block;
+  margin: 0 auto;
+}
+.wiki-body .hatnote {
+  font-style: italic;
+  color: #444;
+  margin: 0 0 0.6em;
+  font-size: 94%;
+}
+.wiki-body .toc {
+  display: inline-block;
+  border: 1px solid #a2a9b1;
+  background: #f8f9fa;
+  padding: 8px 16px;
+  margin: 1em 0;
+  font-size: 95%;
+}
+.wiki-body .toctitle {
+  font-weight: bold;
+  text-align: center;
+}
+.wiki-body .toc ul {
+  list-style: none;
+  margin: 0.2em 0 0;
+  padding-left: 1.6em;
+}
+.wiki-body .toc > ul {
+  padding-left: 0;
+}
+.wiki-body .toc .tocnumber {
+  margin-right: 0.5em;
+  color: #444;
+}
+.wiki-body .reflist {
+  font-size: 90%;
+  margin-top: 1.2em;
+  column-width: 30em;
+}
+.wiki-body .references {
+  padding-left: 1.8em;
+  margin: 0;
+}
+.wiki-body .references li {
+  margin-bottom: 0.4em;
+}
+.wiki-body sup.reference {
+  font-size: 80%;
+  white-space: nowrap;
+}
+.wiki-body table.wikitable {
+  border-collapse: collapse;
+  margin: 1em 0;
+  border: 1px solid #a2a9b1;
+  font-size: 92%;
+}
+.wiki-body table.wikitable > * > tr > th,
+.wiki-body table.wikitable > * > tr > td {
+  border: 1px solid #a2a9b1;
+  padding: 0.3em 0.6em;
+}
+.wiki-body table.wikitable > * > tr > th {
+  background: #eaecf0;
+}
+@media (max-width: 720px) {
+  .wiki-body table.infobox {
+    float: none;
+    width: 100%;
+    margin: 0 0 1em;
+  }
 }
 .wiki-title {
   border-bottom: 1px solid #a2a9b1;

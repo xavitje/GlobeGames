@@ -31,6 +31,18 @@ async function fetchWikiPage(title) {
   return { title: data.parse.title, html: data.parse.text["*"] };
 }
 
+// Korte inleiding (alleen de eerste alinea's) van een artikel — gebruikt voor
+// de hover-info bij het doelartikel, zodat je weet waar je naar zoekt zonder
+// de hele pagina te hoeven laden.
+async function fetchWikiIntro(title) {
+  const url = `https://nl.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+  const res = await fetch(url);
+  const data = await res.json();
+  const page = Object.values(data.query?.pages || {})[0];
+  if (!page || page.missing !== undefined) throw new Error("Artikel niet gevonden");
+  return (page.extract || "").trim();
+}
+
 // ---------- Klein toastje (herbruikt dezelfde stijl als de cheat-toast) ----------
 
 function wsToast(text) {
@@ -481,18 +493,29 @@ async function startRun() {
   ws.gameState = "playing";
   ws.clicks = 0;
   ws.history = [ws.startPage];
+  ws.visited = [];
+  ws.goalIntro = null;
+  ws.goalIntroError = false;
   ws.startTime = Date.now();
   ws.endTime = null;
 
   app.innerHTML = `
     <div class="ws-run-header" id="wsHeader">
       <div class="ws-run-info">
-        <div>Doel: <strong>${ws.endPage}</strong></div>
+        <div class="ws-info-wrap">
+          Doel: <strong>${ws.endPage}</strong>
+          <span class="ws-info-icon" id="wsGoalInfoIcon" tabindex="0" title="Bekijk samenvatting">${icon("info", { size: "sm" })}</span>
+          <div class="ws-info-popover">
+            <div class="ws-info-popover-title">${ws.endPage}</div>
+            <div id="wsGoalInfoBody">Laden...</div>
+          </div>
+        </div>
         <div class="small">Vanaf: ${ws.startPage}</div>
       </div>
       <div class="ws-run-timer" id="wsTimer">00:00</div>
       <div class="ws-run-clicks">Clicks: <strong id="wsClicks">0</strong></div>
     </div>
+    <div class="ws-trail-bar" id="wsTrailBar"></div>
     ${ws.room ? `
     <div class="ws-sidebar" id="wsSidebar">
       <h3>${icon("users", { size: "sm" })} Spelers</h3>
@@ -501,6 +524,18 @@ async function startRun() {
     <div class="ws-wiki-wrap ${ws.room ? "ws-with-sidebar" : ""}" id="wsWikiContainer">
       <h2 style="text-align:center; margin-top:50px;">Artikel laden...</h2>
     </div>`;
+
+  const infoIcon = document.getElementById("wsGoalInfoIcon");
+  if (infoIcon) {
+    infoIcon.addEventListener("click", (e) => {
+      e.stopPropagation();
+      infoIcon.closest(".ws-info-wrap")?.classList.toggle("ws-info-open");
+    });
+    document.addEventListener("click", () => {
+      document.querySelector(".ws-info-wrap.ws-info-open")?.classList.remove("ws-info-open");
+    });
+  }
+  loadGoalIntro();
 
   const timerEl = document.getElementById("wsTimer");
   ws.timerInt = setInterval(() => {
@@ -524,6 +559,33 @@ async function startRun() {
   await loadArticle(ws.startPage);
 }
 
+// Haalt alleen de inleidende alinea('s) van het doelartikel op voor de
+// hover-info — los van loadArticle() zodat dit niet de eigenlijke race
+// vertraagt en gewoon op de achtergrond kan bijladen.
+async function loadGoalIntro() {
+  try {
+    const text = await fetchWikiIntro(ws.endPage);
+    ws.goalIntro = text || "Geen samenvatting beschikbaar.";
+  } catch (e) {
+    ws.goalIntroError = true;
+  }
+  const el = document.getElementById("wsGoalInfoBody");
+  if (!el) return;
+  el.textContent = ws.goalIntroError ? "Kon geen samenvatting laden." : ws.goalIntro;
+}
+
+// Balkje met de route die je tot nu toe hebt afgelegd (de links die je hebt
+// gebruikt), zodat je kunt zien waar je vandaan komt tijdens het spelen.
+function renderTrail() {
+  const bar = document.getElementById("wsTrailBar");
+  if (!bar) return;
+  bar.innerHTML = ws.visited.map((t, i) => `
+    ${i > 0 ? `<span class="ws-trail-sep">${icon("chevronRight", { size: "sm" })}</span>` : ""}
+    <span class="ws-trail-item${i === ws.visited.length - 1 ? " ws-trail-current" : ""}">${t}</span>
+  `).join("");
+  bar.scrollLeft = bar.scrollWidth;
+}
+
 window.wsHandleLinkClick = function (e, targetTitle) {
   e.preventDefault();
   if (ws.endTime) return; // al klaar
@@ -545,6 +607,9 @@ async function loadArticle(title) {
   try {
     const page = await fetchWikiPage(title);
 
+    if (ws.visited[ws.visited.length - 1] !== page.title) ws.visited.push(page.title);
+    renderTrail();
+
     if (ws.room) ws.room.send("progress", { clicks: ws.clicks, current: page.title });
 
     if (page.title.toLowerCase() === ws.endPage.toLowerCase()) {
@@ -558,8 +623,11 @@ async function loadArticle(title) {
         <div class="wiki-body">${page.html}</div>
       </div>`;
 
-    // Wikipedia-specifieke elementen weghalen die de UI breken of vals spelen mogelijk maken.
-    container.querySelectorAll(".navbox, .reflist, .infobox, .reference, .mw-editsection, .noprint, #toc").forEach((el) => el.remove());
+    // Alleen de navigatieboxen onderaan (die vaak enorm zijn) en de nutteloze
+    // "[bewerken]"-linkjes weghalen. Infobox, inhoudsopgave en de
+    // bronnenlijst blijven nu gewoon staan — die hoorden juist bij een echte
+    // Wikipedia-pagina en werden hiervoor per ongeluk verwijderd.
+    container.querySelectorAll(".navbox, .mw-editsection").forEach((el) => el.remove());
 
     // Interne links kapen zodat een klik een nieuwe ronde in het spel start i.p.v. een echte navigatie.
     container.querySelectorAll("a").forEach((a) => {
@@ -568,6 +636,9 @@ async function loadArticle(title) {
         const targetTitle = decodeURIComponent(href.replace("/wiki/", "")).replace(/_/g, " ").split("#")[0];
         a.href = "#";
         a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
+      } else if (href && href.startsWith("#")) {
+        // Anker binnen dezelfde pagina (inhoudsopgave, voetnoot-terugverwijzing)
+        // — laat gewoon native scrollen, telt niet als klik in de race.
       } else {
         // Externe links of speciale namespaces (Bestand:, Categorie:) staan uit.
         a.style.color = "inherit";

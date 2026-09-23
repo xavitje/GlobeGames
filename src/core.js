@@ -46,6 +46,7 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>',
   fastForward: '<polyline points="4 6 11 12 4 18"/><polyline points="12 6 19 12 12 18"/>',
   bookOpen: '<path d="M12 6.2c-2-1.5-4.6-2-7.2-1.5v13c2.6-.5 5.2 0 7.2 1.5 2-1.5 4.6-2 7.2-1.5v-13c-2.6-.5-5.2 0-7.2 1.5Z"/><line x1="12" y1="6.2" x2="12" y2="19.2"/>',
+  info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r="0.9" fill="currentColor" stroke="none"/>',
 };
 
 export function icon(name, opts = {}) {
