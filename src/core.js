@@ -41,6 +41,7 @@ const ICONS = {
   trophy: '<path d="M6 4h12v3a6 6 0 0 1-12 0Z"/><path d="M6 5H3a3 3 0 0 0 3 5"/><path d="M18 5h3a3 3 0 0 1-3 5"/><line x1="12" y1="13" x2="12" y2="17.5"/><line x1="8.5" y1="20" x2="15.5" y2="20"/><line x1="12" y1="17.5" x2="12" y2="20"/>',
   user: '<circle cx="12" cy="8.3" r="3.6"/><path d="M4.7 20c0-3.6 3.1-6.3 7.3-6.3s7.3 2.7 7.3 6.3"/>',
   dice: '<rect x="4" y="4" width="16" height="16" rx="3.6"/><circle cx="8.3" cy="8.3" r="1.1"/><circle cx="15.7" cy="8.3" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="8.3" cy="15.7" r="1.1"/><circle cx="15.7" cy="15.7" r="1.1"/>',
+  shuffle: '<path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>',
   swap: '<path d="M4 8h13"/><polyline points="13 4 17 8 13 12"/><path d="M20 16H7"/><polyline points="11 12 7 16 11 20"/>',
   send: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/>',
   clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>',

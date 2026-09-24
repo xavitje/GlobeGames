@@ -1697,7 +1697,9 @@ a.linklike {
   justify-content: space-between;
   gap: var(--space-4);
   padding: 0 var(--space-5);
-  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
   color: var(--ink);
 }
@@ -1829,6 +1831,11 @@ a.linklike {
 .ws-trail-item {
   color: var(--sub);
   flex: 0 0 auto;
+  animation: ws-trail-in 0.3s ease-out;
+}
+@keyframes ws-trail-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 .ws-trail-item.ws-trail-current {
   color: var(--ink);
@@ -2105,4 +2112,90 @@ a.linklike {
 }
 .gg-autocomplete-item:hover {
   background: var(--panel2);
+}
+
+.ws-setup-preview {
+  margin-top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  box-shadow: var(--shadow);
+}
+.ws-setup-preview img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.ws-setup-preview-text {
+  flex: 1;
+  font-size: 13.5px;
+  color: var(--sub);
+  line-height: 1.5;
+  overflow: hidden;
+}
+.ws-setup-preview-text strong {
+  display: block;
+  font-size: 15px;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.ws-setup-preview-text p {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ws-drawer {
+  position: fixed;
+  top: 56px;
+  right: -360px;
+  width: 340px;
+  bottom: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 400;
+  transition: right 0.3s ease;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+.ws-drawer.open {
+  right: 0;
+}
+.ws-drawer-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  cursor: pointer;
+  color: var(--sub);
+}
+.ws-drawer-close:hover {
+  color: var(--ink);
+}
+.ws-drawer h3 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  padding-right: 24px;
+}
+.ws-drawer img {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+}
+.ws-drawer p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--sub);
+  margin: 0;
 }

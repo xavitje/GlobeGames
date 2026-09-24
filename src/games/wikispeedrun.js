@@ -63,6 +63,23 @@ async function fetchWikiIntro(title) {
   return (page.extract || "").trim();
 }
 
+async function fetchWikiPreviewInfo(title) {
+  if (!title) return null;
+  try {
+    const url = `https://nl.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=300&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const page = Object.values(data.query?.pages || {})[0];
+    if (!page || page.missing !== undefined) return null;
+    return {
+      extract: (page.extract || "").trim(),
+      thumbnail: page.thumbnail?.source || null
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 // ---------- Hover-preview op elke interne link ----------
 // Gecachet per titel zodat je bij het opnieuw hoveren over dezelfde link (of
 // een link naar een artikel dat al eens is opgezocht) niet steeds opnieuw
@@ -303,8 +320,10 @@ window.wsShowSoloSetup = function () {
       <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
       <button class="btn primary" onclick="wsStartSolo()">Start ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
-  attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; });
-  attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; });
+  attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; updateSetupPreview("wsStartPage", v); });
+  attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; updateSetupPreview("wsEndPage", v); });
+  updateSetupPreview("wsStartPage", ws.startPage);
+  updateSetupPreview("wsEndPage", ws.endPage);
 };
 
 window.wsStartSolo = function () {
@@ -329,8 +348,33 @@ function articleFieldHtml(id, label, value) {
     <div style="display:flex; gap:8px; position:relative;">
       <input id="${id}" type="text" autocomplete="off" placeholder="Zoek of typ een titel..." value="${value || ""}"
         style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
-      <button class="btn" onclick="wsSetRandom('${id}')" title="Willekeurig artikel">${icon("dice", { size: "sm" })}</button>
-    </div>`;
+      <button class="btn" onclick="wsSetRandom('${id}')" title="Willekeurig artikel">${icon("shuffle", { size: "sm" })} Willekeurig</button>
+    </div>
+    <div id="${id}Preview" class="ws-setup-preview" style="display:none;"></div>`;
+}
+
+async function updateSetupPreview(id, title) {
+  const previewEl = document.getElementById(id + "Preview");
+  if (!previewEl) return;
+  if (!title || title.trim().length < 2) {
+    previewEl.innerHTML = "";
+    previewEl.style.display = "none";
+    return;
+  }
+  previewEl.style.display = "flex";
+  previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">Laden...</div>`;
+  const info = await fetchWikiPreviewInfo(title);
+  if (!info) {
+    previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">Geen info gevonden.</div>`;
+    return;
+  }
+  previewEl.innerHTML = `
+    ${info.thumbnail ? `<img src="${info.thumbnail}" alt="${title}" />` : ""}
+    <div class="ws-setup-preview-text">
+      <strong>${title}</strong>
+      <p>${truncateIntro(info.extract, 150) || "Geen samenvatting."}</p>
+    </div>
+  `;
 }
 
 window.wsSetRandom = async function (inputId) {
@@ -343,6 +387,7 @@ window.wsSetRandom = async function (inputId) {
     const title = await fetchWikiRandom();
     input.value = title;
     if (inputId === "wsStartPage") ws.startPage = title; else ws.endPage = title;
+    updateSetupPreview(inputId, title);
     if (ws.isHost) scheduleSync();
   } catch (e) {
     input.value = prev;
@@ -531,8 +576,10 @@ function drawLobby() {
     </div>`;
 
   if (ws.isHost) {
-    attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; scheduleSync(); });
-    attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; scheduleSync(); });
+    attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; scheduleSync(); updateSetupPreview("wsStartPage", v); });
+    attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; scheduleSync(); updateSetupPreview("wsEndPage", v); });
+    updateSetupPreview("wsStartPage", ws.startPage);
+    updateSetupPreview("wsEndPage", ws.endPage);
   }
   renderPlayerList();
 }
@@ -600,11 +647,7 @@ async function startRun() {
       <div class="ws-run-info">
         <div class="ws-info-wrap">
           Doel: <strong>${ws.endPage}</strong>
-          <span class="ws-info-icon" id="wsGoalInfoIcon" tabindex="0" title="Bekijk samenvatting">${icon("info", { size: "sm" })}</span>
-          <div class="ws-info-popover">
-            <div class="ws-info-popover-title">${ws.endPage}</div>
-            <div id="wsGoalInfoBody">Laden...</div>
-          </div>
+          <span class="ws-info-icon" id="wsGoalInfoIcon" tabindex="0" title="Bekijk doel">${icon("info", { size: "sm" })}</span>
         </div>
         <div class="small">Vanaf: ${ws.startPage}</div>
       </div>
@@ -619,17 +662,21 @@ async function startRun() {
     </div>` : ""}
     <div class="ws-wiki-wrap ${ws.room ? "ws-with-sidebar" : ""}" id="wsWikiContainer">
       <h2 style="text-align:center; margin-top:50px;">Artikel laden...</h2>
+    </div>
+    <div class="ws-drawer" id="wsGoalDrawer">
+      <div class="ws-drawer-close" id="wsGoalDrawerClose">${icon("close")}</div>
+      <h3>Doel: ${ws.endPage}</h3>
+      <div id="wsGoalDrawerBody">Laden...</div>
     </div>`;
 
   const infoIcon = document.getElementById("wsGoalInfoIcon");
-  if (infoIcon) {
-    infoIcon.addEventListener("click", (e) => {
-      e.stopPropagation();
-      infoIcon.closest(".ws-info-wrap")?.classList.toggle("ws-info-open");
-    });
-    document.addEventListener("click", () => {
-      document.querySelector(".ws-info-wrap.ws-info-open")?.classList.remove("ws-info-open");
-    });
+  const drawer = document.getElementById("wsGoalDrawer");
+  const drawerClose = document.getElementById("wsGoalDrawerClose");
+  if (infoIcon && drawer) {
+    infoIcon.addEventListener("click", () => drawer.classList.add("open"));
+  }
+  if (drawerClose && drawer) {
+    drawerClose.addEventListener("click", () => drawer.classList.remove("open"));
   }
   loadGoalIntro();
 
@@ -659,15 +706,20 @@ async function startRun() {
 // hover-info — los van loadArticle() zodat dit niet de eigenlijke race
 // vertraagt en gewoon op de achtergrond kan bijladen.
 async function loadGoalIntro() {
+  let html = "Geen samenvatting beschikbaar.";
   try {
-    const text = await fetchWikiIntro(ws.endPage);
-    ws.goalIntro = text || "Geen samenvatting beschikbaar.";
+    const info = await fetchWikiPreviewInfo(ws.endPage);
+    if (info) {
+      html = `
+        ${info.thumbnail ? `<img src="${info.thumbnail}" alt="${ws.endPage}" />` : ""}
+        <p>${info.extract || "Geen samenvatting."}</p>
+      `;
+    }
   } catch (e) {
-    ws.goalIntroError = true;
+    html = "Kon geen samenvatting laden.";
   }
-  const el = document.getElementById("wsGoalInfoBody");
-  if (!el) return;
-  el.textContent = ws.goalIntroError ? "Kon geen samenvatting laden." : ws.goalIntro;
+  const el = document.getElementById("wsGoalDrawerBody");
+  if (el) el.innerHTML = html;
 }
 
 // Balkje met de route die je tot nu toe hebt afgelegd (de links die je hebt
