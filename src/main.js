@@ -18,7 +18,12 @@ function getPathSegments() {
   return location.pathname.split("/").filter(Boolean);
 }
 
+let lastPathname = null;
+
 function renderRoute() {
+  if (lastPathname === location.pathname) return;
+  lastPathname = location.pathname;
+
   const [view, ...rest] = getPathSegments();
   if (view === "geohunt") renderGeoHunt(app);
   else if (view === "silhouette") renderSilhouette(app);

@@ -44,7 +44,7 @@ async function fetchWikiSearch(query) {
 }
 
 async function fetchWikiPage(title) {
-  const url = `https://nl.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&prop=text&format=json&origin=*`;
+  const url = `https://nl.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&redirects=1&prop=text&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.error) throw new Error(data.error.info);
@@ -648,6 +648,10 @@ async function startRun() {
         <div class="ws-info-wrap">
           Doel: <strong>${ws.endPage}</strong>
           <span class="ws-info-icon" id="wsGoalInfoIcon" tabindex="0" title="Bekijk doel">${icon("info", { size: "sm" })}</span>
+          <div class="ws-info-popover">
+            <div class="ws-info-popover-title">${ws.endPage}</div>
+            <div id="wsGoalInfoBody">Laden...</div>
+          </div>
         </div>
         <div class="small">Vanaf: ${ws.startPage}</div>
       </div>
@@ -706,20 +710,27 @@ async function startRun() {
 // hover-info — los van loadArticle() zodat dit niet de eigenlijke race
 // vertraagt en gewoon op de achtergrond kan bijladen.
 async function loadGoalIntro() {
-  let html = "Geen samenvatting beschikbaar.";
+  let htmlDrawer = "Geen samenvatting beschikbaar.";
+  let htmlPopover = "Geen samenvatting beschikbaar.";
   try {
     const info = await fetchWikiPreviewInfo(ws.endPage);
     if (info) {
-      html = `
+      htmlDrawer = `
         ${info.thumbnail ? `<img src="${info.thumbnail}" alt="${ws.endPage}" />` : ""}
         <p>${info.extract || "Geen samenvatting."}</p>
       `;
+      htmlPopover = truncateIntro(info.extract, 420) || "Geen samenvatting.";
     }
   } catch (e) {
-    html = "Kon geen samenvatting laden.";
+    htmlDrawer = "Kon geen samenvatting laden.";
+    htmlPopover = "Kon geen samenvatting laden.";
   }
-  const el = document.getElementById("wsGoalDrawerBody");
-  if (el) el.innerHTML = html;
+  
+  const elDrawer = document.getElementById("wsGoalDrawerBody");
+  if (elDrawer) elDrawer.innerHTML = htmlDrawer;
+
+  const elPopover = document.getElementById("wsGoalInfoBody");
+  if (elPopover) elPopover.textContent = htmlPopover;
 }
 
 // Balkje met de route die je tot nu toe hebt afgelegd (de links die je hebt
