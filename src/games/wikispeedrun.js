@@ -139,6 +139,7 @@ async function showLinkPreview(a, title) {
 }
 
 function hideLinkPreview() {
+  clearTimeout(wsPreviewTimer);
   wsPreviewToken++; // annuleert een eventuele lopende fetch
   document.getElementById("wsLinkPreview")?.classList.remove("ws-visible");
 }
@@ -699,8 +700,31 @@ async function startRun() {
       wsToast("Zoeken (Ctrl+F) is geblokkeerd tijdens de Speedrun!");
     }
   };
+  const antiCheatBlur = () => {
+    const container = document.getElementById("wsWikiContainer");
+    if (container) {
+      container.style.visibility = "hidden";
+      container.style.opacity = "0";
+    }
+  };
+  const antiCheatFocus = () => {
+    const container = document.getElementById("wsWikiContainer");
+    if (container) {
+      container.style.visibility = "";
+      container.style.opacity = "";
+    }
+  };
+  
   window.addEventListener("keydown", antiCheat);
-  ws.cleanupCheat = () => window.removeEventListener("keydown", antiCheat);
+  window.addEventListener("blur", antiCheatBlur);
+  window.addEventListener("focus", antiCheatFocus);
+  
+  ws.cleanupCheat = () => {
+    window.removeEventListener("keydown", antiCheat);
+    window.removeEventListener("blur", antiCheatBlur);
+    window.removeEventListener("focus", antiCheatFocus);
+    antiCheatFocus();
+  };
 
   if (ws.room) renderScoreboard();
   await loadArticle(ws.startPage);
