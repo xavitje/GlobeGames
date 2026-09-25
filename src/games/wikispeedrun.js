@@ -16,7 +16,7 @@ let syncTimer = null;
 // een grover maar prima werkende indicatie dat een artikel genoeg inhoud en
 // links heeft om mee te racen.
 async function fetchWikiRandom() {
-  const url = `https://nl.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=10&format=json&origin=*`;
+  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=10&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
   const titles = (data.query?.random || []).map((r) => r.title);
@@ -24,7 +24,7 @@ async function fetchWikiRandom() {
   if (titles.length === 1) return titles[0];
 
   try {
-    const infoUrl = `https://nl.wikipedia.org/w/api.php?action=query&prop=info&titles=${encodeURIComponent(titles.join("|"))}&format=json&origin=*`;
+    const infoUrl = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&prop=info&titles=${encodeURIComponent(titles.join("|"))}&format=json&origin=*`;
     const infoRes = await fetch(infoUrl);
     const infoData = await infoRes.json();
     const pages = Object.values(infoData.query?.pages || {});
@@ -37,14 +37,14 @@ async function fetchWikiRandom() {
 
 async function fetchWikiSearch(query) {
   if (!query) return [];
-  const url = `https://nl.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=6&namespace=0&format=json&origin=*`;
+  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=6&namespace=0&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
   return data[1] || [];
 }
 
 async function fetchWikiPage(title) {
-  const url = `https://nl.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&redirects=1&prop=text&format=json&origin=*`;
+  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&redirects=1&prop=text&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.error) throw new Error(data.error.info);
@@ -55,7 +55,7 @@ async function fetchWikiPage(title) {
 // de hover-info bij het doelartikel én voor de hover-previews op elke blauwe
 // link in het artikel (net als Wikipedia's eigen "paginavoorbeelden").
 async function fetchWikiIntro(title) {
-  const url = `https://nl.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
   const page = Object.values(data.query?.pages || {})[0];
@@ -66,7 +66,7 @@ async function fetchWikiIntro(title) {
 async function fetchWikiPreviewInfo(title) {
   if (!title) return null;
   try {
-    const url = `https://nl.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=300&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+    const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=300&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
     const res = await fetch(url);
     const data = await res.json();
     const page = Object.values(data.query?.pages || {})[0];
@@ -271,6 +271,7 @@ export function renderWikiSpeedrun(container, routeSegments = []) {
     players: [],
     gameState: "menu",
     clicks: 0,
+    lang: "nl",
     startTime: null,
     endTime: null,
     history: [],
@@ -313,6 +314,11 @@ window.wsShowSoloSetup = function () {
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("flag", { size: "sm" })} Solo instellen</h2><div class="desc">Kies een start- en eindartikel.</div></div></div>
     <div class="card" style="cursor:default; overflow:visible;">
+      <label class="gg-label">Taal</label>
+      <select id="wsLangSelect" onchange="wsSetLang(this.value)" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
+        <option value="nl" ${ws.lang === "nl" ? "selected" : ""}>Nederlands</option>
+        <option value="en" ${ws.lang === "en" ? "selected" : ""}>Engels</option>
+      </select>
       ${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}
       ${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}
       <div id="wsSoloError" class="small" style="color:var(--danger); margin-top:10px; display:none;"></div>
@@ -327,9 +333,22 @@ window.wsShowSoloSetup = function () {
   updateSetupPreview("wsEndPage", ws.endPage);
 };
 
+window.wsSetLang = function(lang) {
+  ws.lang = lang;
+  const sInput = document.getElementById("wsStartPage");
+  const eInput = document.getElementById("wsEndPage");
+  if (sInput) sInput.value = "";
+  if (eInput) eInput.value = "";
+  ws.startPage = "";
+  ws.endPage = "";
+  updateSetupPreview("wsStartPage", "");
+  updateSetupPreview("wsEndPage", "");
+  if (ws.isHost) scheduleSync();
+};
+
 async function resolveWikiTitle(title) {
   try {
-    const url = `https://nl.wikipedia.org/w/api.php?action=query&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+    const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
     const res = await fetch(url);
     const data = await res.json();
     const page = Object.values(data.query?.pages || {})[0];
@@ -541,11 +560,13 @@ async function enterLobby(code) {
   ws.room.on("settings", (s) => {
     ws.startPage = s.startPage;
     ws.endPage = s.endPage;
+    if (s.lang) ws.lang = s.lang;
     if (!ws.isHost) updateGuestRouteView();
   });
   ws.room.on("start", (payload) => {
     ws.startPage = payload.startPage;
     ws.endPage = payload.endPage;
+    if (payload.lang) ws.lang = payload.lang;
     startRun();
   });
   ws.room.on("progress", (msg) => renderScoreboard(msg, "progress"));
@@ -558,7 +579,7 @@ function scheduleSync() {
   if (!ws.isHost || !ws.room) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    ws.room.send("settings", { startPage: ws.startPage, endPage: ws.endPage });
+    ws.room.send("settings", { startPage: ws.startPage, endPage: ws.endPage, lang: ws.lang });
   }, 250);
 }
 
@@ -578,8 +599,13 @@ function drawLobby() {
     <div class="card" style="cursor:default; margin-top:12px; overflow:visible;">
       <h3 style="margin-bottom:10px;">${icon("flag", { size: "sm" })} Route</h3>
       ${ws.isHost
-        ? `${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}`
-        : `<p id="wsGuestRoute" class="small">Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong></p>`}
+        ? `<label class="gg-label">Taal</label>
+           <select id="wsLangSelect" onchange="wsSetLang(this.value)" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
+             <option value="nl" ${ws.lang === "nl" ? "selected" : ""}>Nederlands</option>
+             <option value="en" ${ws.lang === "en" ? "selected" : ""}>Engels</option>
+           </select>
+           ${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}`
+        : `<p id="wsGuestRoute" class="small">Taal: <strong>${ws.lang === "en" ? "Engels" : "Nederlands"}</strong><br>Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong></p>`}
     </div>
     <div class="guesslist" style="margin-top:14px;" id="wsPlayerList"></div>
     <div class="footerrow">
@@ -598,7 +624,7 @@ function drawLobby() {
 
 function updateGuestRouteView() {
   const el = document.getElementById("wsGuestRoute");
-  if (el) el.innerHTML = `Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong>`;
+  if (el) el.innerHTML = `Taal: <strong>${ws.lang === "en" ? "Engels" : "Nederlands"}</strong><br>Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong>`;
 }
 
 window.wsCopyLink = function () {
@@ -633,7 +659,7 @@ window.wsStartGame = async function () {
 
   ws.startPage = start;
   ws.endPage = end;
-  ws.room.send("start", { startPage: start, endPage: end });
+  ws.room.send("start", { startPage: start, endPage: end, lang: ws.lang });
 };
 
 function renderPlayerList() {
@@ -944,7 +970,7 @@ async function loadArticle(title) {
         // je lopende run niet verloren gaat. Relatieve Wikipedia-paden (zoals
         // "/wiki/Bestand:...") wijzen anders naar ons eigen domein i.p.v.
         // wikipedia.org, dus die maken we eerst absoluut.
-        a.href = href.startsWith("/") ? `https://nl.wikipedia.org${href}` : href;
+        a.href = href.startsWith("/") ? `https://${ws.lang || 'nl'}.wikipedia.org${href}` : href;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
       }
