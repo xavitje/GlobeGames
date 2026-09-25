@@ -36,7 +36,7 @@ function sleep(ms) {
 // Rejects panoramas with no navigable links: those are dead-end/enclosed spots
 // (courtyards, building interiors Google mislabels as outdoor, private
 // driveways, etc.) where the player can't move and has no clues at all.
-export async function findNearbyPanorama(maps, lat, lng, { minLinks = 3 } = {}) {
+export async function findNearbyPanorama(maps, lat, lng, { minLinks = 2 } = {}) {
   // Een hele kleine jitter (ongeveer 50-100 meter) om exact op de marker/indoor spawns te vermijden
   const jitterLat = (Math.random() - 0.5) * 0.001;
   const jitterLng = (Math.random() - 0.5) * 0.001;
@@ -52,11 +52,13 @@ export async function findNearbyPanorama(maps, lat, lng, { minLinks = 3 } = {}) 
         source: maps.StreetViewSource.OUTDOOR,
       },
       (data, status) => {
+        const isOfficial = data && data.copyright && data.copyright.includes("Google");
         if (
           status === maps.StreetViewStatus.OK &&
           data &&
           data.location &&
-          (data.links ? data.links.length : 0) >= minLinks
+          (data.links ? data.links.length : 0) >= minLinks &&
+          isOfficial
         ) {
           resolve({
             lat: data.location.latLng.lat(),

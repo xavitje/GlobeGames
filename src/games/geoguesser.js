@@ -332,7 +332,7 @@ function onRoundTimeUp() {
         if (info) info.textContent = "Tijd voorbij — geen gok geplaatst";
       }
     }
-    if (gg.isHost) hostFinishRound();
+    if (gg.isHost) setTimeout(hostFinishRound, 1500);
   } else if (gg.mode === "solo" || gg.mode === "daily") {
     if (gg.submitted) return;
     if (gg.guess) submitSoloGuess();
@@ -1542,7 +1542,7 @@ window.ggMpStartGame = function () {
     gg.room.players().forEach(p => { gg.hp[p.playerId] = 5000; });
   }
   if (gg.gameMode === "teamduels") {
-    gg.teamScore = { A: 0, B: 0 };
+    gg.teamHp = { A: 5000, B: 5000 };
   }
   if (gg.gameMode === "br") {
     gg.alive = new Set(gg.room.players().map(p => p.playerId));
@@ -1559,12 +1559,12 @@ window.ggMpStartGame = function () {
 async function hostAdvanceRound() {
   gg.round++;
   const outOfRounds = gg.rounds === '∞' ? false : gg.round > gg.rounds;
-  const duelDecided = gg.gameMode === "duels" && gg.duelOver;
+  const duelDecided = (gg.gameMode === "duels" || gg.gameMode === "teamduels") && gg.duelOver;
   const brDecided = gg.gameMode === "br" && gg.alive.size <= 1;
   if (outOfRounds || duelDecided || brDecided) {
     gg.room.send("gameover", {
       scoreboard: gg.scoreboard, history: gg.history,
-      hp: gg.hp, teamScore: gg.teamScore, eliminated: gg.eliminated, alive: [...gg.alive],
+      hp: gg.hp, teamHp: gg.teamHp, eliminated: gg.eliminated, alive: [...gg.alive],
     });
     return;
   }
@@ -1695,19 +1695,33 @@ function hostFinishRound() {
     const [a, b] = guesses;
     const aDmg = Math.max(0, a.pts - b.pts);
     const bDmg = Math.max(0, b.pts - a.pts);
-    damage[a.playerId] = a.shield ? Math.round(aDmg / 2) : aDmg;
-    damage[b.playerId] = b.shield ? Math.round(bDmg / 2) : bDmg;
+    damage[a.playerId] = b.shield ? Math.round(aDmg / 2) : aDmg;
+    damage[b.playerId] = a.shield ? Math.round(bDmg / 2) : bDmg;
     gg.hp[b.playerId] = Math.max(0, (gg.hp[b.playerId] ?? 5000) - damage[a.playerId]);
     gg.hp[a.playerId] = Math.max(0, (gg.hp[a.playerId] ?? 5000) - damage[b.playerId]);
     if (gg.hp[a.playerId] <= 0 || gg.hp[b.playerId] <= 0) gg.duelOver = true;
   }
 
-  // Team Duels: only the team's best guess this round counts.
+  // Team Duels: distance-based damage to the opponent team.
+  let teamDamage = {};
   if (gg.gameMode === "teamduels") {
-    ["A", "B"].forEach((team) => {
-      const teamGuesses = guesses.filter((g) => gg.teams[g.playerId] === team);
-      if (teamGuesses.length) gg.teamScore[team] = (gg.teamScore[team] || 0) + Math.max(...teamGuesses.map((g) => g.pts));
-    });
+    let aBest = { pts: 0, shield: false };
+    let bBest = { pts: 0, shield: false };
+    const aTeamGuesses = guesses.filter((g) => gg.teams[g.playerId] === "A");
+    const bTeamGuesses = guesses.filter((g) => gg.teams[g.playerId] === "B");
+    
+    if (aTeamGuesses.length) aBest = aTeamGuesses.reduce((prev, current) => (prev.pts > current.pts) ? prev : current);
+    if (bTeamGuesses.length) bBest = bTeamGuesses.reduce((prev, current) => (prev.pts > current.pts) ? prev : current);
+    
+    const aDmg = Math.max(0, aBest.pts - bBest.pts);
+    const bDmg = Math.max(0, bBest.pts - aBest.pts);
+    
+    teamDamage["A"] = bBest.shield ? Math.round(aDmg / 2) : aDmg;
+    teamDamage["B"] = aBest.shield ? Math.round(bDmg / 2) : bDmg;
+    
+    gg.teamHp.B = Math.max(0, (gg.teamHp.B ?? 5000) - teamDamage["A"]);
+    gg.teamHp.A = Math.max(0, (gg.teamHp.A ?? 5000) - teamDamage["B"]);
+    if (gg.teamHp.A <= 0 || gg.teamHp.B <= 0) gg.duelOver = true;
   }
 
   // Battle Royale: whoever guessed worst this round is out (unless everyone tied).
@@ -1726,7 +1740,7 @@ function hostFinishRound() {
   gg.history.push({ round: gg.round, country: answer.countryHint, guesses });
   gg.room.send("results", {
     round: gg.round, total: gg.rounds, answer, guesses, scoreboard: gg.scoreboard,
-    gameMode: gg.gameMode, damage, hp: gg.hp, teamScore: gg.teamScore,
+    gameMode: gg.gameMode, damage, hp: gg.hp, teamHp: gg.teamHp, teamDamage,
     eliminatedThisRound, eliminated: gg.eliminated, alive: [...gg.alive], duelOver: gg.duelOver,
   });
   gg.finishingRound = false;
@@ -1739,7 +1753,7 @@ function onMpResults(payload) {
   gg.lastResultsPayload = payload;
   gg.scoreboard = payload.scoreboard;
   if (payload.hp) gg.hp = payload.hp;
-  if (payload.teamScore) gg.teamScore = payload.teamScore;
+  if (payload.teamHp) gg.teamHp = payload.teamHp;
   if (payload.alive) gg.alive = new Set(payload.alive);
   if (payload.eliminated) gg.eliminated = payload.eliminated;
   if (payload.duelOver) gg.duelOver = true;
@@ -1763,7 +1777,7 @@ function onMpResults(payload) {
 function drawMpResultsScreen(payload) {
   const sorted = [...payload.guesses].sort((a, b) => b.pts - a.pts);
   const isLast = (gg.rounds !== '∞' && gg.round >= gg.rounds)
-    || (gg.gameMode === "duels" && gg.duelOver)
+    || ((gg.gameMode === "duels" || gg.gameMode === "teamduels") && gg.duelOver)
     || (gg.gameMode === "br" && gg.alive.size <= 1);
 
   const modeExtraHtml = (() => {
@@ -1782,12 +1796,18 @@ function drawMpResultsScreen(payload) {
         }).join("")}
       </div>`;
     }
-    if (gg.gameMode === "teamduels" && payload.teamScore) {
-      return `<div class="card" style="cursor:default; margin-top:10px; text-align:center;">
-        <h3 style="margin-bottom:10px;">${icon("users", { size: "sm" })} Teamscore</h3>
-        <div style="display:flex; justify-content:center; gap:24px; font-size:18px; font-weight:700;">
-          <span>Team A: ${payload.teamScore.A || 0}</span><span>Team B: ${payload.teamScore.B || 0}</span>
-        </div>
+    if (gg.gameMode === "teamduels" && payload.teamHp) {
+      return `<div class="card" style="cursor:default; margin-top:10px;">
+        <h3 style="margin-bottom:10px;">${icon("heart", { size: "sm" })} Team Levens</h3>
+        ${["A", "B"].map(team => {
+          const hp = payload.teamHp[team];
+          const pct = Math.max(0, Math.min(100, Math.round(hp / 5000 * 100)));
+          const dmg = payload.teamDamage?.[team] || 0;
+          return `<div style="margin-bottom:8px;">
+            <div class="small" style="display:flex; justify-content:space-between;"><span>Team ${team}</span><span>${hp} hp${dmg ? ` · +${dmg} schade` : ""}</span></div>
+            <div class="gg-hp-track"><div class="gg-hp-fill" style="width:${pct}%;"></div></div>
+          </div>`;
+        }).join("")}
       </div>`;
     }
     if (gg.gameMode === "br" && payload.eliminatedThisRound?.length) {
@@ -1934,10 +1954,10 @@ function onMpGameOver(payload) {
       winnerText = `${hpA >= hpB ? nameFor(pidA) : nameFor(pidB)} wint het duel!`;
       extraWinnerHtml = `<p class="small">${nameFor(pidA)}: ${hpA} hp · ${nameFor(pidB)}: ${hpB} hp</p>`;
     }
-  } else if (gg.gameMode === "teamduels" && payload.teamScore) {
-    const winTeam = (payload.teamScore.A || 0) >= (payload.teamScore.B || 0) ? "A" : "B";
+  } else if (gg.gameMode === "teamduels" && payload.teamHp) {
+    const winTeam = (payload.teamHp.A || 0) >= (payload.teamHp.B || 0) ? "A" : "B";
     winnerText = `Team ${winTeam} wint!`;
-    extraWinnerHtml = `<p class="small">Team A: ${payload.teamScore.A || 0} · Team B: ${payload.teamScore.B || 0}</p>`;
+    extraWinnerHtml = `<p class="small">Team A: ${payload.teamHp.A || 0} hp · Team B: ${payload.teamHp.B || 0} hp</p>`;
   } else if (gg.gameMode === "br" && payload.alive) {
     const aliveNames = payload.alive.map((pid) => gg.scoreboard[pid]?.name).filter(Boolean);
     if (aliveNames.length === 1) winnerText = `${aliveNames[0]} wint Battle Royale!`;
