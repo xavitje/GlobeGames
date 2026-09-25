@@ -643,6 +643,16 @@ async function startRun() {
   ws.startTime = Date.now();
   ws.endTime = null;
 
+  if (ws.room) {
+    ws.players.forEach((p) => {
+      p.finished = false;
+      p.finalClicks = null;
+      p.finalTime = null;
+      p.progress = "Startpagina...";
+      p.progressClicks = 0;
+    });
+  }
+
   app.innerHTML = `
     <div class="ws-run-header" id="wsHeader">
       <div class="ws-run-info">
@@ -657,7 +667,10 @@ async function startRun() {
         <div class="small">Vanaf: ${ws.startPage}</div>
       </div>
       <div class="ws-run-timer" id="wsTimer">00:00</div>
-      <div class="ws-run-clicks">Clicks: <strong id="wsClicks">0</strong></div>
+      <div class="ws-run-clicks" style="display:flex; align-items:center; gap:12px;">
+        <div>Clicks: <strong id="wsClicks">0</strong></div>
+        <button class="btn small" onclick="wsGiveUp()">${icon("flag", { size: "sm" })} Geef op</button>
+      </div>
     </div>
     <div class="ws-trail-bar" id="wsTrailBar"></div>
     ${ws.room ? `
@@ -947,14 +960,40 @@ function winGame(finalTitle) {
         <h1>Gehaald!</h1>
         <p>Je hebt <strong>${ws.endPage}</strong> bereikt in <strong>${ws.clicks}</strong> clicks!</p>
         <p class="small">Tijd: ${(timeMs / 1000).toFixed(1)} seconden</p>
-        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} Terug naar menu</button>
+        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} Terug naar ${ws.room ? 'lobby' : 'menu'}</button>
       </div>`;
   }
 }
 
 window.wsBackToMenu = function () {
-  setUrlPath("/wikispeedrun");
-  renderWikiSpeedrun(app);
+  if (ws.room) {
+    ws.gameState = "lobby";
+    drawLobby();
+  } else {
+    setUrlPath("/wikispeedrun");
+    renderWikiSpeedrun(app);
+  }
+};
+
+window.wsGiveUp = function () {
+  if (!confirm("Weet je zeker dat je wilt opgeven?")) return;
+  
+  ws.endTime = Date.now();
+  ws.gameState = "finished";
+  if (ws.cleanupCheat) ws.cleanupCheat();
+
+  if (ws.room) ws.room.send("progress", { clicks: ws.clicks, current: "Opgegeven ❌" });
+
+  const container = document.getElementById("wsWikiContainer");
+  if (container) {
+    container.innerHTML = `
+      <div class="ws-finish-card">
+        ${icon("warning", { size: "xl" })}
+        <h1>Opgegeven</h1>
+        <p>Je hebt de handdoek in de ring gegooid na <strong>${ws.clicks}</strong> clicks.</p>
+        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} Terug naar ${ws.room ? 'lobby' : 'menu'}</button>
+      </div>`;
+  }
 };
 
 function renderScoreboard(msgPayload, type) {
