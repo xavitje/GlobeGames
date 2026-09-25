@@ -969,7 +969,12 @@ async function loadArticle(title) {
       }
 
       if (targetTitle && !targetTitle.includes(":")) {
-        targetTitle = decodeURIComponent(targetTitle).replace(/_/g, " ").split("#")[0];
+        try {
+          targetTitle = decodeURIComponent(targetTitle);
+        } catch (e) {
+          // URI malformed (bijv. een %-teken dat niet goed encoded is)
+        }
+        targetTitle = targetTitle.replace(/_/g, " ").split("#")[0];
         if (targetTitle) {
           a.href = "#";
           a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
