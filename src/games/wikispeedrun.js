@@ -955,11 +955,26 @@ async function loadArticle(title) {
     // Interne links kapen zodat een klik een nieuwe ronde in het spel start i.p.v. een echte navigatie.
     container.querySelectorAll("a").forEach((a) => {
       const href = a.getAttribute("href");
-      if (href && href.startsWith("/wiki/") && !href.includes(":")) {
-        const targetTitle = decodeURIComponent(href.replace("/wiki/", "")).replace(/_/g, " ").split("#")[0];
-        a.href = "#";
-        a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
-        attachLinkPreview(a, targetTitle);
+      let targetTitle = null;
+
+      if (href) {
+        if (href.startsWith("/wiki/")) {
+          targetTitle = href.replace("/wiki/", "");
+        } else {
+          const absolutePrefix = `https://${ws.lang || 'nl'}.wikipedia.org/wiki/`;
+          if (href.startsWith(absolutePrefix)) {
+            targetTitle = href.replace(absolutePrefix, "");
+          }
+        }
+      }
+
+      if (targetTitle && !targetTitle.includes(":")) {
+        targetTitle = decodeURIComponent(targetTitle).replace(/_/g, " ").split("#")[0];
+        if (targetTitle) {
+          a.href = "#";
+          a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
+          attachLinkPreview(a, targetTitle);
+        }
       } else if (href && href.startsWith("#")) {
         // Anker binnen dezelfde pagina (inhoudsopgave, voetnoot-terugverwijzing)
         // — laat gewoon native scrollen, telt niet als klik in de race.
@@ -976,10 +991,12 @@ async function loadArticle(title) {
       }
     });
   } catch (e) {
+    console.error(e);
     const prevTitle = ws.history.length > 1 ? ws.history[ws.history.length - 2] : null;
     container.innerHTML = `
       <div style="text-align:center; margin-top:50px;">
         <h2 style="color:var(--danger);">Fout bij laden van artikel: ${title}</h2>
+        <p style="color:var(--text-dim); margin-bottom:16px;">${e.message || String(e)}</p>
         ${prevTitle ? `<button class="btn" onclick="wsHandleLinkClick(event, '${prevTitle}')">${icon("chevronLeft", { size: "sm" })} Terug</button>` : ""}
       </div>`;
   }
