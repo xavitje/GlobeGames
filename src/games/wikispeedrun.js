@@ -327,7 +327,18 @@ window.wsShowSoloSetup = function () {
   updateSetupPreview("wsEndPage", ws.endPage);
 };
 
-window.wsStartSolo = function () {
+async function resolveWikiTitle(title) {
+  try {
+    const url = `https://nl.wikipedia.org/w/api.php?action=query&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const page = Object.values(data.query?.pages || {})[0];
+    if (page && page.title) return page.title;
+  } catch (e) {}
+  return title;
+}
+
+window.wsStartSolo = async function () {
   const start = (document.getElementById("wsStartPage")?.value || "").trim();
   const end = (document.getElementById("wsEndPage")?.value || "").trim();
   const errEl = document.getElementById("wsSoloError");
@@ -335,8 +346,8 @@ window.wsStartSolo = function () {
   if (!start || !end) return showError("Kies eerst een start- en eindartikel.");
   if (start.toLowerCase() === end.toLowerCase()) return showError("Start- en eindartikel moeten verschillend zijn.");
 
-  ws.startPage = start;
-  ws.endPage = end;
+  ws.startPage = await resolveWikiTitle(start);
+  ws.endPage = await resolveWikiTitle(end);
   ws.isHost = false;
   ws.room = null;
   startRun();
@@ -607,15 +618,19 @@ window.wsLeaveLobby = function () {
   showMenu();
 };
 
-window.wsStartGame = function () {
+window.wsStartGame = async function () {
   // Rechtstreeks uit de velden lezen i.p.v. te vertrouwen op ws.startPage/
   // endPage: die werden voorheen alleen bijgewerkt als je iets uit de
   // dropdown koos, dus een getypte-maar-niet-aangeklikte titel werd hier
   // altijd als "leeg" gezien.
-  const start = (document.getElementById("wsStartPage")?.value || ws.startPage || "").trim();
-  const end = (document.getElementById("wsEndPage")?.value || ws.endPage || "").trim();
+  let start = (document.getElementById("wsStartPage")?.value || ws.startPage || "").trim();
+  let end = (document.getElementById("wsEndPage")?.value || ws.endPage || "").trim();
   if (!start || !end) return wsToast("Kies eerst een start- en eindartikel.");
   if (start.toLowerCase() === end.toLowerCase()) return wsToast("Start en eind moeten verschillend zijn.");
+  
+  start = await resolveWikiTitle(start);
+  end = await resolveWikiTitle(end);
+
   ws.startPage = start;
   ws.endPage = end;
   ws.room.send("start", { startPage: start, endPage: end });
