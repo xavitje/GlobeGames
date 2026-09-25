@@ -699,28 +699,56 @@ async function startRun() {
       e.preventDefault();
       wsToast("Zoeken (Ctrl+F) is geblokkeerd tijdens de Speedrun!");
     }
+    if (e.key === "F12") {
+      e.preventDefault();
+      wsToast("Inspecteren is geblokkeerd!");
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && ["i", "j", "c"].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      wsToast("Inspecteren is geblokkeerd!");
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+      e.preventDefault();
+      wsToast("Broncode bekijken is geblokkeerd!");
+    }
   };
+  const antiContextMenu = (e) => {
+    e.preventDefault();
+    wsToast("Rechtermuisknop is geblokkeerd!");
+  };
+  let wikiContentNode = null;
   const antiCheatBlur = () => {
     const container = document.getElementById("wsWikiContainer");
-    if (container) {
-      container.style.visibility = "hidden";
-      container.style.opacity = "0";
+    const content = container?.querySelector(".wiki-content");
+    if (content) {
+      wikiContentNode = content;
+      content.remove();
+      
+      const warning = document.createElement("h2");
+      warning.id = "wsCheatWarning";
+      warning.style.cssText = "text-align:center; margin-top:50px; color:var(--danger);";
+      warning.textContent = "Pagina verborgen om spieken te voorkomen 👀. Klik hier om verder te gaan.";
+      container.appendChild(warning);
     }
   };
   const antiCheatFocus = () => {
     const container = document.getElementById("wsWikiContainer");
-    if (container) {
-      container.style.visibility = "";
-      container.style.opacity = "";
+    const warning = document.getElementById("wsCheatWarning");
+    if (warning) warning.remove();
+    if (container && wikiContentNode) {
+      container.appendChild(wikiContentNode);
+      wikiContentNode = null;
     }
   };
   
   window.addEventListener("keydown", antiCheat);
+  window.addEventListener("contextmenu", antiContextMenu);
   window.addEventListener("blur", antiCheatBlur);
   window.addEventListener("focus", antiCheatFocus);
   
   ws.cleanupCheat = () => {
     window.removeEventListener("keydown", antiCheat);
+    window.removeEventListener("contextmenu", antiContextMenu);
     window.removeEventListener("blur", antiCheatBlur);
     window.removeEventListener("focus", antiCheatFocus);
     antiCheatFocus();
