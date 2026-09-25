@@ -1036,6 +1036,9 @@ window.ggShowMpHostSettings = function (prefill = {}) {
       ${locationSettingHtml("mp", prefill.locationSet)}
       ${difficultySettingHtml("mp", prefill.difficulty, prefill.blackwhite)}
       ${timerSettingHtml("mp", prefill.roundTime || null)}
+      <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
+        <input type="checkbox" id="mpPowerups" ${prefill.powerups !== false ? "checked" : ""} /> Powerups & sabotages aan
+      </label>
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
@@ -1122,6 +1125,7 @@ function getMpSettings() {
     locationSet: readLocationSetting("mp"),
     roundTime: readTimerSetting("mp"),
     gameMode: document.getElementById("mpGameMode")?.value || "ffa",
+    powerups: !!document.getElementById("mpPowerups")?.checked,
     difficulty, blackwhite,
   };
 }
@@ -1206,6 +1210,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
     rounds: settings?.rounds ?? 5, locationSet: settings?.locationSet ?? "world",
     roundTime: settings?.roundTime ?? null,
     difficulty: settings?.difficulty ?? "free", blackwhite: settings?.blackwhite ?? false,
+    powerups: settings?.powerups ?? true,
     gameMode: settings?.gameMode ?? "ffa", teams: {}, hp: {}, alive: new Set(), eliminated: [],
     teamScore: { A: 0, B: 0 },
     pointFn: buildPointFn(settings?.locationSet ?? "world"),
@@ -1308,6 +1313,7 @@ function onMpSettingsReceived(payload) {
   gg.gameMode = payload.gameMode ?? "ffa";
   gg.difficulty = payload.difficulty ?? "free";
   gg.blackwhite = payload.blackwhite ?? false;
+  gg.powerups = payload.powerups ?? true;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
@@ -1346,7 +1352,7 @@ function drawLobbyWaiting() {
         <input class="gg-share-input" id="ggShareUrl" value="${shareUrl}" readonly />
         <button class="btn" onclick="ggCopyLink()">${icon("clipboard", { size: "sm" })} Kopieer</button>
       </div>
-      <div class="small" style="margin-top:8px;">${icon("gear", { size: "sm" })} ${modeLabel} · ${gg.rounds} rondes · ${setLabel}${gg.roundTime ? ` · ${gg.roundTime}s per ronde` : ""}</div>
+      <div class="small" style="margin-top:8px;">${icon("gear", { size: "sm" })} ${modeLabel} · ${gg.rounds} rondes · ${setLabel}${gg.roundTime ? ` · ${gg.roundTime}s per ronde` : ""} · Powerups: ${gg.powerups !== false ? "Aan" : "Uit"}</div>
     </div>
     ${teamsHtml}
     <div class="guesslist" style="margin-top:14px;">
@@ -1377,7 +1383,7 @@ window.ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); clearLobbyS
 
 window.ggBackToHostSettings = function () {
   if (!gg?.isHost) return;
-  const prefill = { name: gg.name, rounds: gg.rounds, locationSet: gg.locationSet, gameMode: gg.gameMode, roundTime: gg.roundTime };
+  const prefill = { name: gg.name, rounds: gg.rounds, locationSet: gg.locationSet, gameMode: gg.gameMode, roundTime: gg.roundTime, powerups: gg.powerups };
   teardown();
   clearLobbyFromUrl();
   clearLobbySession();
@@ -1543,7 +1549,7 @@ window.ggMpStartGame = function () {
     gg.eliminated = [];
   }
 
-  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite });
+  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite, powerups: gg.powerups });
   gg.room.send("teams", { teams: gg.teams });
   hostAdvanceRound();
 };
@@ -1586,10 +1592,15 @@ function onMpRoundStart(payload) {
 
   // Powerups & Sabotages
   if (payload.round === 1) {
-    const powerups = ["hint", "shield", "5050"];
-    const sabotages = ["fakehint", "ink", "nocompass"];
-    gg.myPowerup = powerups[Math.floor(Math.random() * powerups.length)];
-    gg.mySabotage = sabotages[Math.floor(Math.random() * sabotages.length)];
+    if (gg.powerups !== false) {
+      const powerups = ["hint", "shield", "5050"];
+      const sabotages = ["fakehint", "ink", "nocompass"];
+      gg.myPowerup = powerups[Math.floor(Math.random() * powerups.length)];
+      gg.mySabotage = sabotages[Math.floor(Math.random() * sabotages.length)];
+    } else {
+      gg.myPowerup = null;
+      gg.mySabotage = null;
+    }
     gg.usedPowerup = false;
     gg.usedSabotage = false;
   }
@@ -2000,6 +2011,7 @@ function onMpRestart(payload) {
   gg.gameMode = payload.gameMode ?? gg.gameMode;
   gg.difficulty = payload.difficulty ?? "free";
   gg.blackwhite = payload.blackwhite ?? false;
+  gg.powerups = payload.powerups ?? true;
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
