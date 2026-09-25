@@ -44,38 +44,32 @@ export async function findNearbyPanorama(maps, lat, lng, { minLinks = 3 } = {}) 
   const searchLng = lng + jitterLng;
 
   const sv = new maps.StreetViewService();
-  // Kleinere radii zodat de API niet zo traag reageert (50m, 500m, 2000m)
-  const radii = [50, 500, 2000];
-  for (const radius of radii) {
-    const result = await new Promise((resolve) => {
-      sv.getPanorama(
-        {
-          location: { lat: searchLat, lng: searchLng },
-          radius,
-          source: maps.StreetViewSource.OUTDOOR,
-        },
-        (data, status) => {
-          if (
-            status === maps.StreetViewStatus.OK &&
-            data &&
-            data.location &&
-            (data.links ? data.links.length : 0) >= minLinks
-          ) {
-            resolve({
-              lat: data.location.latLng.lat(),
-              lng: data.location.latLng.lng(),
-              pano: data.location.pano,
-            });
-          } else {
-            resolve(null);
-          }
-        },
-      );
-    });
-    if (result) return result;
-    await sleep(20);
-  }
-  return null;
+  const result = await new Promise((resolve) => {
+    sv.getPanorama(
+      {
+        location: { lat: searchLat, lng: searchLng },
+        radius: 5000,
+        source: maps.StreetViewSource.OUTDOOR,
+      },
+      (data, status) => {
+        if (
+          status === maps.StreetViewStatus.OK &&
+          data &&
+          data.location &&
+          (data.links ? data.links.length : 0) >= minLinks
+        ) {
+          resolve({
+            lat: data.location.latLng.lat(),
+            lng: data.location.latLng.lng(),
+            pano: data.location.pano,
+          });
+        } else {
+          resolve(null);
+        }
+      },
+    );
+  });
+  return result;
 }
 
 // weightedRandomPointFn() -> { country, lat, lon }
@@ -135,13 +129,6 @@ export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
 // Google's own CDN start working on those tiles before the player actually
 // clicks, so the next step tends to feel snappier.
 function warmNeighboringPanoramas(maps, panorama) {
-  const sv = new maps.StreetViewService();
-  const warm = () => {
-    const links = panorama.getLinks() || [];
-    links.forEach((link) => {
-      if (!link || !link.pano) return;
-      sv.getPanorama({ pano: link.pano }, () => {});
-    });
-  };
-  maps.event.addListener(panorama, "links_changed", warm);
+  // Disabled: fetching all neighboring panoramas on every movement causes API lag
+  // and connection limits to be hit, resulting in slow movement.
 }
