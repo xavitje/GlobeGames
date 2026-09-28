@@ -16,6 +16,14 @@ export class AppRouter {
       if (!link || link.target || link.hasAttribute("download")) return;
       const url = new URL(link.href, location.href);
       if (url.origin !== location.origin) return;
+      // A same-page anchor jump (only the #hash differs, e.g. a footnote
+      // "^" back-reference inside a WikiSpeedrun article) isn't a route
+      // change — let the browser handle it natively. Otherwise this forced
+      // a full re-render of the current route on every such click, which
+      // for a page holding in-progress, non-URL-encoded state (like an
+      // active WikiSpeedrun run) meant losing that state and getting
+      // bounced back to the game's menu.
+      if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
       event.preventDefault();
       this.navigate(`${url.pathname}${url.search}${url.hash}`);
     };

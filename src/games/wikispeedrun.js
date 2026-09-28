@@ -871,10 +871,15 @@ async function loadArticle(title) {
       } else if (href && href.startsWith("#")) {
         // Same-page anchors scroll normally and do not count as race clicks.
       } else if (href) {
-        // Open external and special-namespace links separately to preserve the run.
-        a.href = href.startsWith("/") ? `https://${ws.lang || 'nl'}.wikipedia.org${href}` : href;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
+        // Non-article destinations (Portal:/Wikipedia:/Talk: namespaces,
+        // sister-project links to Wiktionary/Commons/Wikiquote/etc., real
+        // external sites like government or news pages) aren't part of the
+        // race. They used to pop open a new tab — disruptive mid-run and not
+        // how the original game behaves — so they're now inert instead:
+        // left looking like a normal link, but the click does nothing and
+        // the run stays uninterrupted.
+        a.removeAttribute("target");
+        a.onclick = (e) => e.preventDefault();
       }
     });
   } catch (e) {
