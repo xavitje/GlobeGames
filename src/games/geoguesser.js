@@ -224,6 +224,7 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
   const savedLobby = hasMultiplayerConfig() ? getLobbySession() : null;
 
   if (section === "singleplayer") { ggShowSoloSettings(); return; }
+  if (section === "daily") { ggStartDaily(); return; }
 
   if (section === "multiplayer" && subCode) {
     if (subCode === "host") {

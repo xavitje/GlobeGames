@@ -13,7 +13,7 @@ export function appHeader({ compact = false } = {}) {
     </a>
     <nav class="atlas-main-nav" aria-label="Main navigation">
       <a href="/">${t("games")}</a>
-      <a href="/geoguesser">${t("daily")}</a>
+      <a href="/geoguesser/daily">${t("daily")}</a>
     </nav>
     <div class="atlas-header-actions">
       <button class="atlas-language" type="button" data-language-toggle aria-label="${lang === "en" ? "Switch to Dutch" : "Schakel naar Engels"}">
