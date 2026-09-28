@@ -54,6 +54,22 @@ export class AppRouter {
     this.lastPathname = null;
   }
 
+  // A game screen (e.g. WikiSpeedrun/GeoGuesser moving between in-run
+  // articles or rounds) reflects its state in the URL with
+  // history.replaceState for shareable/bookmarkable links, without that
+  // being an actual route change. The router has no other way to learn
+  // this happened, so without this call its bookkeeping (`lastPathname`)
+  // silently falls out of sync with the real URL. Once that happens, ANY
+  // later popstate — including one fired by a same-page anchor click, like
+  // a footnote "^" or a table-of-contents link — looks like a genuine
+  // navigation to a different page and triggers a full destructive
+  // re-render of the route (losing the in-progress run). Games call this
+  // right after their own history.replaceState to keep the router's
+  // bookkeeping accurate.
+  syncPath() {
+    this.lastPathname = location.pathname;
+  }
+
   cleanup() {
     this.activeCleanup?.();
     this.activeCleanup = null;

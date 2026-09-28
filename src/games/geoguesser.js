@@ -22,6 +22,7 @@ import { getSession } from "../lib/auth.js";
 import { MultiplayerServer } from "../lib/multiplayer-server.js";
 import { accountSignInPath, rememberAuthReturn } from "../lib/auth-return.js";
 import { buildPointFn, difficultySettingHtml, locationSetLabel, locationSettingHtml, readDifficultySetting, readLocationSetting, readTimerSetting, timerSettingHtml, wireDifficultySetting, wireLocationSetting, wireTimerSetting } from "./geoguesser/settings.js";
+import { router } from "../main.js";
 
 let app;
 let gg = null;
@@ -180,6 +181,12 @@ function getLobbySession() {
 // Reflect internal screens in replaceable, shareable URLs.
 function setUrlPath(path) {
   history.replaceState(null, "", path);
+  // See the matching comment in wikispeedrun.js's setUrlPath: without this,
+  // the router's own bookkeeping of "the current path" drifts out of sync
+  // with the real URL, and a later popstate gets mistaken for a real
+  // navigation, force-rerendering the whole route and losing round/lobby
+  // state.
+  router.syncPath();
 }
 function setLobbyInUrl(code) {
   setUrlPath(code ? `/geoguesser/multiplayer/${code.toUpperCase()}` : "/geoguesser/multiplayer");

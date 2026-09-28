@@ -70,7 +70,7 @@ const titles = {
   account: "Account",
 };
 
-const router = new AppRouter({
+export const router = new AppRouter({
   root: app,
   routes: Object.fromEntries(Object.entries(routeLoaders).map(([name, loader]) => [name, async (...args) => {
     const page = await loader(...args);
