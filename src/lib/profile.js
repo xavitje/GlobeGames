@@ -4,6 +4,7 @@
 import { PLAYER_COLORS } from "../core.js";
 
 const KEY = "gg_profile";
+const USER_KEY = "gg_profile_user_id";
 const COLORS = PLAYER_COLORS;
 
 export function getProfile() {
@@ -21,6 +22,30 @@ export function saveProfile(profile) {
   try {
     localStorage.setItem(KEY, JSON.stringify(profile));
   } catch (e) {}
+}
+
+export function syncProfileFromSession(session) {
+  const user = session?.user;
+  if (!user) return getProfile();
+  const metadata = user.user_metadata || {};
+  const accountName = metadata.display_name
+    || metadata.full_name
+    || metadata.name
+    || user.email?.split("@")[0]
+    || "";
+  const current = getProfile();
+  let previousUserId = "";
+  try { previousUserId = localStorage.getItem(USER_KEY) || ""; } catch {}
+
+  // A first login (or a switch to another account) adopts the account name.
+  // For the same account, a name typed in a multiplayer lobby stays intact.
+  const next = {
+    name: previousUserId === user.id && current.name ? current.name : accountName,
+    color: metadata.color || current.color,
+  };
+  saveProfile(next);
+  try { localStorage.setItem(USER_KEY, user.id); } catch {}
+  return next;
 }
 
 function escapeHtml(s) {

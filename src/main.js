@@ -47,7 +47,16 @@ async function renderRoute(force = false) {
     try { activeCleanup(); } catch {}
     activeCleanup = null;
   }
-  const [view, ...rest] = getPathSegments();
+  let [view, ...rest] = getPathSegments();
+  // Supabase normally returns to /account. If its Site URL is ever used as a
+  // fallback and points at the domain root, recover the callback here instead
+  // of leaving credentials visible on the homepage.
+  if (!view && /(?:access_token|refresh_token|error_description)=/.test(location.hash)) {
+    history.replaceState(null, "", `/account${location.hash}`);
+    lastPathname = location.pathname;
+    view = "account";
+    rest = [];
+  }
   if (!view) {
     app.innerHTML = hubHtml();
     initAdSlots();
@@ -134,3 +143,18 @@ window.ggToggleLanguage = function ggToggleLanguage() {
 window.addEventListener("popstate", () => { lastPathname = null; renderRoute(); });
 window.addEventListener("globegames:language", () => { lastPathname = null; });
 renderRoute();
+
+// Hydrate the lightweight multiplayer profile from the signed-in account in
+// the background. Existing fields are only filled while still empty, so a
+// player can immediately type a different lobby name if they prefer.
+Promise.all([import("./lib/auth.js"), import("./lib/profile.js")])
+  .then(async ([auth, profile]) => {
+    const session = await auth.getSession();
+    if (!session) return;
+    const synced = profile.syncProfileFromSession(session);
+    ["ggNameInput", "ggAutoJoinName", "wsNameInput"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input && !input.value.trim()) input.value = synced.name;
+    });
+  })
+  .catch(() => {});

@@ -55,8 +55,12 @@ The account page uses the same Supabase project. In the Supabase dashboard:
 
 1. Enable **Email** and **Google** under Authentication → Providers.
 2. Add your Google OAuth client ID and secret to the Google provider.
-3. Add the local and production URLs under Authentication → URL Configuration, for example
-   `http://localhost:5173/**` and `https://globegames.vercel.app/**`.
+3. Under Authentication → URL Configuration set the **Site URL** to
+   `https://games.drissi.store`.
+4. Add these **Redirect URLs**:
+   - `https://games.drissi.store/account`
+   - `http://localhost:5173/account`
+   - optionally `http://localhost:5174/account` when Vite selects its fallback port
 
 No extra frontend environment variables are required beyond the Supabase URL and anon key above.
 

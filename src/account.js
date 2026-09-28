@@ -10,7 +10,7 @@ import {
   signUpWithEmail,
   updateAccount,
 } from "./lib/auth.js";
-import { getProfile, saveProfile } from "./lib/profile.js";
+import { getProfile, saveProfile, syncProfileFromSession } from "./lib/profile.js";
 
 let root = null;
 let session = null;
@@ -40,7 +40,10 @@ function initials(name) {
 export async function renderAccount(container) {
   root = container;
   root.innerHTML = `${appHeader()}<div class="account-loading"><span class="atlas-loader"></span>${pick("Loading your account…", "Je account laden…")}</div>`;
-  try { session = await getSession(); } catch { session = null; }
+  try {
+    session = await getSession();
+    if (session) syncProfileFromSession(session);
+  } catch { session = null; }
   draw();
 }
 

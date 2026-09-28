@@ -7,6 +7,12 @@ export async function getSession() {
   if (!client) return null;
   const { data, error } = await client.auth.getSession();
   if (error) throw error;
+  // Implicit OAuth callbacks contain credentials in the URL fragment. Once
+  // Supabase has persisted the session, immediately remove those credentials
+  // from the address bar and browser history.
+  if (data.session && /(?:access_token|refresh_token)=/.test(location.hash)) {
+    history.replaceState(null, "", `${location.pathname}${location.search}`);
+  }
   return data.session;
 }
 
@@ -64,6 +70,8 @@ export async function updateAccount({ displayName, color }) {
 export async function signOut() {
   const client = getSupabase();
   if (!client) return;
-  const { error } = await client.auth.signOut();
+  // Global scope also revokes refresh tokens for other browser sessions. This
+  // is intentional for the account-level "Sign out" action.
+  const { error } = await client.auth.signOut({ scope: "global" });
   if (error) throw error;
 }
