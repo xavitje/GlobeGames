@@ -11,7 +11,7 @@ import {
   updateAccount,
 } from "./lib/auth.js";
 import { getProfile, saveProfile, syncProfileFromSession } from "./lib/profile.js";
-import { AVATAR_PRESETS, avatarHtml, normalizeAvatar } from "./lib/avatar.js";
+import { AVATAR_PRESETS, avatarHtml, compressImageToDataUrl, normalizeAvatar } from "./lib/avatar.js";
 import { pendingAuthReturn, rememberAuthReturn, takeAuthReturn } from "./lib/auth-return.js";
 
 let root = null;
@@ -39,8 +39,31 @@ function userAvatar() {
   return normalizeAvatar(session?.user?.user_metadata?.avatar || getProfile().avatar);
 }
 
-function userAvatarUrl() {
+// Google's own OAuth profile picture — set by the provider at sign-in, never
+// written to by us, so a custom upload can never clobber it.
+function userGoogleAvatarUrl() {
   return session?.user?.user_metadata?.avatar_url || session?.user?.user_metadata?.picture || getProfile().avatarUrl || "";
+}
+
+// A photo the player uploaded themselves (see wireSettings' upload handler),
+// stored under its own metadata key so it never overwrites Google's picture.
+function userCustomAvatarUrl() {
+  return session?.user?.user_metadata?.custom_avatar_url || getProfile().customAvatarUrl || "";
+}
+
+// The URL that actually belongs to whichever avatar is currently selected.
+function activeAvatarUrl(avatarId) {
+  return avatarId === "custom" ? userCustomAvatarUrl() : userGoogleAvatarUrl();
+}
+
+// Shared between the initial render and the post-upload refresh, so both
+// stay in sync without duplicating the button markup.
+function avatarGridHtml({ avatar, googleUrl, customUrl, name }) {
+  return `
+    ${googleUrl ? `<button type="button" data-avatar="google" class="${avatar === "google" ? "active" : ""}" aria-label="Google profile picture">${avatarHtml({ avatar: "google", avatarUrl: googleUrl, name })}<span>Google</span></button>` : ""}
+    ${customUrl ? `<button type="button" data-avatar="custom" class="${avatar === "custom" ? "active" : ""}" aria-label="${pick("Uploaded photo", "Geüploade foto")}">${avatarHtml({ avatar: "custom", avatarUrl: customUrl, name })}<span>${pick("Your photo", "Jouw foto")}</span></button>` : ""}
+    ${AVATAR_PRESETS.map((item) => `<button type="button" data-avatar="${item.id}" class="${avatar === item.id ? "active" : ""}" aria-label="${item.label}">${avatarHtml({ avatar: item.id, name })}<span>${item.label}</span></button>`).join("")}
+  `;
 }
 
 function continueAfterAuth() {
@@ -150,7 +173,9 @@ function settingsHtml() {
   const name = userName();
   const color = userColor();
   const avatar = userAvatar();
-  const avatarUrl = userAvatarUrl();
+  const googleUrl = userGoogleAvatarUrl();
+  const customUrl = userCustomAvatarUrl();
+  const avatarUrl = activeAvatarUrl(avatar);
   const lang = getLanguage();
   return `<main class="account-settings-shell">
     <section class="account-settings-head">
@@ -168,12 +193,15 @@ function settingsHtml() {
         <div class="settings-pane ${settingsSection === "profile" ? "active" : ""}" data-settings-pane="profile">
           <div class="settings-section-heading"><div><h2>${pick("Public profile", "Openbaar profiel")}</h2><p>${pick("This is how other players see you in lobbies and leaderboards.", "Zo zien andere spelers je in lobby's en ranglijsten.")}</p></div></div>
           <form id="accountSettingsForm">
-          <div class="account-avatar-row"><div id="settingsAvatarPreview">${avatarHtml({ avatar, avatarUrl, name, className: "large" })}</div><div><strong id="settingsProfileName">${esc(name)}</strong><small>${pick("Choose a profile image and player colour.", "Kies een profielfoto en spelerskleur.")}</small></div></div>
+          <div class="account-avatar-row"><div id="settingsAvatarPreview">${avatarHtml({ avatar, avatarUrl, name, className: "large" })}</div><div><strong id="settingsProfileName">${esc(name)}</strong><small>${pick("Choose a profile image and player colour. This name and photo are what other players see everywhere in GlobeGames — lobbies, leaderboards and multiplayer.", "Kies een profielfoto en spelerskleur. Deze naam en foto zijn wat andere spelers overal in GlobeGames zien — lobby's, ranglijsten en multiplayer.")}</small></div></div>
           <label>${pick("Display name", "Weergavenaam")}<input id="settingsName" maxlength="18" required value="${esc(name)}"></label>
-          <fieldset><legend>${pick("Profile picture", "Profielfoto")}</legend><div class="settings-avatars">
-            ${avatarUrl ? `<button type="button" data-avatar="google" class="${avatar === "google" ? "active" : ""}" aria-label="Google profile picture">${avatarHtml({ avatar: "google", avatarUrl, name })}<span>Google</span></button>` : ""}
-            ${AVATAR_PRESETS.map((item) => `<button type="button" data-avatar="${item.id}" class="${avatar === item.id ? "active" : ""}" aria-label="${item.label}">${avatarHtml({ avatar: item.id, name })}<span>${item.label}</span></button>`).join("")}
-          </div></fieldset>
+          <fieldset><legend>${pick("Profile picture", "Profielfoto")}</legend>
+            <div class="settings-avatars" id="settingsAvatarGrid">${avatarGridHtml({ avatar, googleUrl, customUrl, name })}</div>
+            <div class="settings-avatar-upload-row">
+              <button type="button" class="btn" id="settingsAvatarUploadBtn">${icon("upload", { size: "sm" })} ${customUrl ? pick("Change photo", "Andere foto") : pick("Upload a photo", "Upload een foto")}</button>
+              <input type="file" id="settingsAvatarFile" accept="image/*" style="display:none">
+            </div>
+          </fieldset>
           <fieldset><legend>${pick("Player colour", "Spelerskleur")}</legend><div class="settings-colours">${PLAYER_COLORS.map((item) => `<button type="button" aria-label="${item}" data-color="${item}" class="${item === color ? "active" : ""}" style="--swatch:${item}"></button>`).join("")}</div></fieldset>
           <div class="settings-form-footer"><span id="settingsMessage" aria-live="polite"></span><button class="account-primary" type="submit">${pick("Save changes", "Wijzigingen opslaan")}</button></div>
           </form>
@@ -194,7 +222,10 @@ function settingsHtml() {
 function wireSettings() {
   let selectedColor = userColor();
   let selectedAvatar = userAvatar();
-  const avatarUrl = userAvatarUrl();
+  const googleAvatarUrl = userGoogleAvatarUrl();
+  let customAvatarUrl = userCustomAvatarUrl();
+  const activeUrl = () => (selectedAvatar === "custom" ? customAvatarUrl : googleAvatarUrl);
+
   root.querySelectorAll("[data-settings-section]").forEach((button) => {
     button.addEventListener("click", () => {
       settingsSection = button.dataset.settingsSection;
@@ -213,25 +244,58 @@ function wireSettings() {
       root.querySelectorAll(".settings-colours button").forEach((item) => item.classList.toggle("active", item === button));
     });
   });
-  root.querySelectorAll(".settings-avatars button").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedAvatar = button.dataset.avatar;
-      root.querySelectorAll(".settings-avatars button").forEach((item) => item.classList.toggle("active", item === button));
-      document.getElementById("settingsAvatarPreview").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl, name: document.getElementById("settingsName").value, className: "large" });
+
+  // Re-bound every time #settingsAvatarGrid is rebuilt (after a photo
+  // upload), since replacing its innerHTML drops the old listeners.
+  function bindAvatarButtons() {
+    root.querySelectorAll("#settingsAvatarGrid button[data-avatar]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedAvatar = button.dataset.avatar;
+        root.querySelectorAll("#settingsAvatarGrid button[data-avatar]").forEach((item) => item.classList.toggle("active", item === button));
+        document.getElementById("settingsAvatarPreview").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl: activeUrl(), name: document.getElementById("settingsName").value, className: "large" });
+      });
     });
+  }
+  bindAvatarButtons();
+
+  document.getElementById("settingsAvatarUploadBtn")?.addEventListener("click", () => {
+    document.getElementById("settingsAvatarFile")?.click();
   });
+  document.getElementById("settingsAvatarFile")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow picking the same file again later
+    if (!file) return;
+    const message = document.getElementById("settingsMessage");
+    message.classList.remove("error");
+    message.textContent = pick("Processing photo…", "Foto verwerken…");
+    try {
+      customAvatarUrl = await compressImageToDataUrl(file);
+      selectedAvatar = "custom";
+      const name = document.getElementById("settingsName").value;
+      document.getElementById("settingsAvatarGrid").innerHTML = avatarGridHtml({ avatar: selectedAvatar, googleUrl: googleAvatarUrl, customUrl: customAvatarUrl, name });
+      bindAvatarButtons();
+      document.getElementById("settingsAvatarUploadBtn").innerHTML = `${icon("upload", { size: "sm" })} ${pick("Change photo", "Andere foto")}`;
+      document.getElementById("settingsAvatarPreview").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl: customAvatarUrl, name, className: "large" });
+      message.textContent = "";
+    } catch (error) {
+      message.textContent = error.message || pick("Could not process that photo.", "Kon die foto niet verwerken.");
+      message.classList.add("error");
+    }
+  });
+
   document.getElementById("accountSettingsForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = document.getElementById("settingsName").value.trim();
     const message = document.getElementById("settingsMessage");
     try {
-      const user = await updateAccount({ displayName: name, color: selectedColor, avatar: selectedAvatar });
-      saveProfile({ name, color: selectedColor, avatar: selectedAvatar, avatarUrl });
+      const user = await updateAccount({ displayName: name, color: selectedColor, avatar: selectedAvatar, customAvatarUrl });
+      saveProfile({ name, color: selectedColor, avatar: selectedAvatar, avatarUrl: googleAvatarUrl, customAvatarUrl });
       session = { ...session, user };
+      message.classList.remove("error");
       message.textContent = pick("Saved", "Opgeslagen") + " ✓";
       document.getElementById("settingsProfileName").textContent = name;
       document.querySelector(".account-settings-head h1").textContent = name;
-      document.getElementById("accountHeaderAvatar").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl, name });
+      document.getElementById("accountHeaderAvatar").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl: activeUrl(), name });
     } catch (error) {
       message.textContent = error.message;
       message.classList.add("error");

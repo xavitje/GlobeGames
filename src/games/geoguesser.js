@@ -192,7 +192,16 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
   window.removeEventListener("keydown", handleCheatKeydown, true);
   window.addEventListener("keydown", handleCheatKeydown, true);
   app = rootEl;
-  actionController = new ActionController(app, GEO_ACTIONS);
+  // Full-screen overlays (#ggFullscreenWrap round HUD, chat widget, reconnect
+  // banner, wager overlay) are appended straight to document.body so they can
+  // escape #app's centered max-width layout — they live outside `app`'s DOM
+  // subtree. Binding the controller to document.body (instead of just `app`)
+  // means its `root.contains(control)` check still matches clicks on those
+  // overlays' data-action buttons (the round HUD's close/reroll/powerup/
+  // sabotage buttons, chat close, wager buttons, ...), which were previously
+  // silently swallowed because they fell outside the `app` subtree — this is
+  // why clicking the round's X (exit-to-start) did nothing.
+  actionController = new ActionController(document.body, GEO_ACTIONS);
   teardown();
   gg = null;
 

@@ -10,10 +10,13 @@ export function getProfile() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      return { name: p.name || "", color: p.color || COLORS[0], avatar: normalizeAvatar(p.avatar), avatarUrl: p.avatarUrl || "" };
+      return {
+        name: p.name || "", color: p.color || COLORS[0], avatar: normalizeAvatar(p.avatar),
+        avatarUrl: p.avatarUrl || "", customAvatarUrl: p.customAvatarUrl || "",
+      };
     }
   } catch (e) {}
-  return { name: "", color: COLORS[0], avatar: "atlas", avatarUrl: "" };
+  return { name: "", color: COLORS[0], avatar: "atlas", avatarUrl: "", customAvatarUrl: "" };
 }
 
 export function saveProfile(profile) {
@@ -41,6 +44,7 @@ export function syncProfileFromSession(session) {
     color: metadata.color || current.color,
     avatar: normalizeAvatar(metadata.avatar || (previousUserId === user.id && current.avatar) || (metadata.avatar_url ? "google" : "atlas")),
     avatarUrl: metadata.avatar_url || metadata.picture || current.avatarUrl || "",
+    customAvatarUrl: metadata.custom_avatar_url || current.customAvatarUrl || "",
   };
   saveProfile(next);
   try { localStorage.setItem(USER_KEY, user.id); } catch {}

@@ -55,14 +55,18 @@ export async function signUpWithEmail(email, password, displayName) {
   return data;
 }
 
-export async function updateAccount({ displayName, color, avatar }) {
+export async function updateAccount({ displayName, color, avatar, customAvatarUrl }) {
   const client = getSupabase();
   if (!client) throw new Error("Supabase is not configured.");
-  const { data, error } = await client.auth.updateUser({
-    data: { display_name: displayName, color, avatar },
-  });
+  // customAvatarUrl (a photo the player uploaded themselves, stored as a
+  // compressed data: URL — see account.js) is written to its own metadata
+  // key, never to `avatar_url`/`picture`, which Google's OAuth sign-in sets
+  // and which we must never overwrite.
+  const data = { display_name: displayName, color, avatar };
+  if (customAvatarUrl !== undefined) data.custom_avatar_url = customAvatarUrl;
+  const { data: result, error } = await client.auth.updateUser({ data });
   if (error) throw error;
-  return data.user;
+  return result.user;
 }
 
 export async function signOut() {

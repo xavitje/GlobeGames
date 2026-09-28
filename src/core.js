@@ -201,6 +201,7 @@ const ICONS = {
   fastForward: '<polyline points="4 6 11 12 4 18"/><polyline points="12 6 19 12 12 18"/>',
   bookOpen: '<path d="M12 6.2c-2-1.5-4.6-2-7.2-1.5v13c2.6-.5 5.2 0 7.2 1.5 2-1.5 4.6-2 7.2-1.5v-13c-2.6-.5-5.2 0-7.2 1.5Z"/><line x1="12" y1="6.2" x2="12" y2="19.2"/>',
   info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r="0.9" fill="currentColor" stroke="none"/>',
+  upload: '<path d="M12 15.5V4.5"/><polyline points="7.5 9 12 4.5 16.5 9"/><path d="M4.5 15.5v3.2a1.8 1.8 0 0 0 1.8 1.8h11.4a1.8 1.8 0 0 0 1.8-1.8v-3.2"/>',
 };
 
 export function icon(name, opts = {}) {
