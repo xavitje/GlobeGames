@@ -15,9 +15,12 @@ export function haversineKm(aLat: number, aLng: number, bLat: number, bLng: numb
   return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
 }
 
+// Same curve as GeoGuessr's world map: 5000 * e^(-d / 1492.7 km), and a
+// perfect 5000 only within 25 m. Keep in sync with
+// src/games/geoguesser/challenge-utils.js (solo scoring).
 export function scoreForDistance(km: number): number {
-  if (km < 20) return 5000;
-  return Math.max(0, Math.round(5000 * Math.exp(-km / 2000)));
+  if (km <= 0.025) return 5000;
+  return Math.max(0, Math.min(4999, Math.round(5000 * Math.exp(-km / 1492.7))));
 }
 
 export function rouletteColor(number: number): "red" | "black" | "green" {

@@ -43,9 +43,13 @@ export function buildDailyShareText(result) {
   return `GlobeGames Daily #${dailyDayNumber()} — ${result.totalScore}/${result.rounds * 5000} pts\n${blocks}\n${location.origin}/geoguesser`;
 }
 
+// Same curve as GeoGuessr's world map: 5000 * e^(-d / 1492.7 km), and a
+// perfect 5000 only within 25 m. (Previously anything under 20 km scored a
+// flat 5000, which felt far too generous.) Keep in sync with
+// supabase/functions/_shared/game-rules.ts, which scores multiplayer.
 export function scoreForDistance(km) {
-  if (km < 20) return 5000;
-  return Math.max(0, Math.round(5000 * Math.exp(-km / 2000)));
+  if (km <= 0.025) return 5000;
+  return Math.max(0, Math.min(4999, Math.round(5000 * Math.exp(-km / 1492.7))));
 }
 
 export function getStreakBest() {
