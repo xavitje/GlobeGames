@@ -2086,6 +2086,85 @@ a.linklike {
   font-size: 94%;
   padding: 3px;
 }
+/* Non-article links (Portal:/Wikipedia:/Talk: namespaces, sister-project
+   links, real external sites) are inert during a run — render them as
+   plain text, not something that looks clickable. */
+.wiki-body a.ws-inert-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: default;
+}
+/* Navboxes (e.g. the "State of California" box) and succession-style
+   tables ("Preceded by / Succeeded by") arrive with their own inline
+   background-color styling from Wikipedia's HTML, but need the base
+   layout/border rules Wikipedia's own site CSS normally supplies — without
+   these they render as bare, unbordered blocks. */
+.wiki-body table.navbox {
+  border: 1px solid #a2a9b1;
+  width: 100%;
+  margin: 1em auto 0;
+  clear: both;
+  font-size: 88%;
+  text-align: center;
+  background: #fdfdfd;
+  border-collapse: collapse;
+}
+.wiki-body table.navbox + table.navbox {
+  margin-top: 0;
+  border-top: 0;
+}
+.wiki-body .navbox-title,
+.wiki-body .navbox-abovebelow {
+  padding: 0.3em;
+  text-align: center;
+  font-weight: bold;
+}
+.wiki-body .navbox-group {
+  white-space: nowrap;
+  padding: 0.25em 0.65em;
+  text-align: right;
+  font-weight: bold;
+  background: #eaecf0;
+}
+.wiki-body .navbox-list {
+  text-align: left;
+  padding: 0.2em 0.5em;
+  width: 100%;
+}
+.wiki-body .navbox-list-with-group {
+  text-align: left;
+  border-left: 2px solid #fdfdfd;
+}
+.wiki-body .navbox-odd { background: #f7f7f7; }
+.wiki-body .navbox-even { background: #fdfdfd; }
+.wiki-body .navbox td { border: 0; }
+.wiki-body .navbox-inner,
+.wiki-body .navbox-subgroup { width: 100%; }
+/* MediaWiki's "hlist" turns bullet lists into an inline, middot-separated
+   row — used inside navboxes and some succession/infobox tables. */
+.wiki-body .hlist ul {
+  margin: 0;
+  padding: 0;
+  display: inline;
+}
+.wiki-body .hlist li {
+  display: inline;
+  margin: 0;
+}
+.wiki-body .hlist li:not(:last-child)::after {
+  content: " · ";
+}
+.wiki-body .hlist dd {
+  display: inline;
+  margin: 0 0.5em 0 0;
+}
+/* Preceded-by/succeeded-by "succession box" tables. */
+.wiki-body table.wikitable.succession-box,
+.wiki-body table.wikitable[style*="succession"] {
+  width: 100%;
+  text-align: center;
+  margin: 1em 0;
+}
 
 .gg-autocomplete-dropdown {
   position: absolute;

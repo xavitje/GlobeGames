@@ -9,7 +9,15 @@ export class AppRouter {
     this.lastPathname = null;
     this.routeVersion = 0;
     this.activeCleanup = null;
-    this.handlePopState = () => this.render(true);
+    // A same-page anchor jump (e.g. a WikiSpeedrun footnote "^" back-
+    // reference) fires a native popstate event too, even though only the
+    // #hash changed and the pathname is identical. Forcing a re-render
+    // here destroyed in-progress, non-URL-encoded page state (like an
+    // active run) on every such click. Real back/forward navigation
+    // always changes the pathname, and render()'s own
+    // `lastPathname === location.pathname` check already re-renders for
+    // that case — so force=true isn't needed here at all.
+    this.handlePopState = () => this.render();
     this.handleLinkClick = (event) => {
       if (event.defaultPrevented) return;
       const link = event.target.closest("a[href]");

@@ -835,8 +835,11 @@ async function loadArticle(title) {
         <div class="wiki-body">${page.html}</div>
       </div>`;
 
-    // Remove navigation boxes and edit links while preserving article content.
-    container.querySelectorAll(".navbox, .mw-editsection").forEach((el) => el.remove());
+    // Edit-section links ("[edit]") aren't useful in-game, but the navbox
+    // (e.g. the colorful "State of California" box) is part of what makes
+    // an article page look right, so it's kept and styled instead of
+    // stripped — see the .wiki-body .navbox rules in style.css.
+    container.querySelectorAll(".mw-editsection").forEach((el) => el.remove());
 
     buildTableOfContents(container.querySelector(".wiki-body"));
 
@@ -875,10 +878,13 @@ async function loadArticle(title) {
         // sister-project links to Wiktionary/Commons/Wikiquote/etc., real
         // external sites like government or news pages) aren't part of the
         // race. They used to pop open a new tab — disruptive mid-run and not
-        // how the original game behaves — so they're now inert instead:
-        // left looking like a normal link, but the click does nothing and
-        // the run stays uninterrupted.
+        // how the original game behaves. They're inert (the click does
+        // nothing, the run stays uninterrupted) and rendered as plain text
+        // (no link color/underline/pointer cursor) so they don't look like
+        // something the player can click through to.
         a.removeAttribute("target");
+        a.removeAttribute("href");
+        a.classList.add("ws-inert-link");
         a.onclick = (e) => e.preventDefault();
       }
     });
