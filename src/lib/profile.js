@@ -1,6 +1,3 @@
-// Lightweight local profile cache used by multiplayer. Signed-in accounts keep
-// the same fields in Supabase user metadata and the account page syncs them here.
-
 import { PLAYER_COLORS } from "../core.js";
 
 const KEY = "gg_profile";
@@ -37,8 +34,7 @@ export function syncProfileFromSession(session) {
   let previousUserId = "";
   try { previousUserId = localStorage.getItem(USER_KEY) || ""; } catch {}
 
-  // A first login (or a switch to another account) adopts the account name.
-  // For the same account, a name typed in a multiplayer lobby stays intact.
+  // Keep lobby edits for the current account, but adopt the name when accounts change.
   const next = {
     name: previousUserId === user.id && current.name ? current.name : accountName,
     color: metadata.color || current.color,
@@ -46,61 +42,4 @@ export function syncProfileFromSession(session) {
   saveProfile(next);
   try { localStorage.setItem(USER_KEY, user.id); } catch {}
   return next;
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
-}
-
-export function ensureProfileWidget() {
-  document.getElementById("gg-profile-widget")?.remove();
-}
-
-function openProfileEditor() {
-  const p = getProfile();
-  const overlay = document.createElement("div");
-  overlay.className = "gg-profile-overlay";
-  overlay.innerHTML = `
-    <div class="gg-profile-modal">
-      <h3>Jouw profiel</h3>
-      <label>Naam</label>
-      <input type="text" id="ggProfileNameInput" maxlength="18" placeholder="Typ je naam..." value="${escapeHtml(p.name)}" />
-      <label>Kleur</label>
-      <div class="gg-profile-colors">
-        ${COLORS.map((c) => `<button type="button" class="gg-profile-color-swatch${c === p.color ? " active" : ""}" style="background:${c}" data-color="${c}"></button>`).join("")}
-      </div>
-      <div class="gg-profile-actions">
-        <button class="btn" id="ggProfileCancelBtn">Annuleren</button>
-        <button class="btn primary" id="ggProfileSaveBtn">Opslaan</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  let chosenColor = p.color;
-  overlay.querySelectorAll(".gg-profile-color-swatch").forEach((sw) => {
-    sw.addEventListener("click", () => {
-      overlay.querySelectorAll(".gg-profile-color-swatch").forEach((s) => s.classList.remove("active"));
-      sw.classList.add("active");
-      chosenColor = sw.dataset.color;
-    });
-  });
-
-  overlay.querySelector("#ggProfileCancelBtn").addEventListener("click", () => overlay.remove());
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) overlay.remove();
-  });
-  overlay.querySelector("#ggProfileSaveBtn").addEventListener("click", () => {
-    const name = overlay.querySelector("#ggProfileNameInput").value.trim();
-    saveProfile({ name, color: chosenColor });
-    overlay.remove();
-    ensureProfileWidget();
-  });
-
-  const nameInput = overlay.querySelector("#ggProfileNameInput");
-  nameInput.focus();
-  nameInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") overlay.querySelector("#ggProfileSaveBtn").click();
-  });
 }

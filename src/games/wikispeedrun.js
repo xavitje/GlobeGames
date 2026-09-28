@@ -3,89 +3,15 @@ import { topbar } from "../lib/layout.js";
 import { hasMultiplayerConfig, GameRoom, randomRoomCode, randomPlayerId } from "../lib/multiplayer.js";
 import { getProfile, saveProfile } from "../lib/profile.js";
 import { getLanguage, pick } from "../lib/i18n.js";
+import { escapeHtml } from "../lib/html.js";
+import { fetchWikiIntro, fetchWikiPage, fetchWikiPreviewInfo, fetchWikiRandom, fetchWikiSearch, resolveWikiTitle } from "./wikispeedrun/wiki-api.js";
+import { ActionController } from "../lib/actions.js";
 
 let app;
-let ws = null; // WikiSpeedrun state
+let ws = null;
 let syncTimer = null;
+let actionController = null;
 
-// ---------- Wikipedia API ----------
-
-// Wikipedia's "willekeurig artikel" pikt uit ALLE artikelen — en een groot
-// deel daarvan zijn kale, bot-gegenereerde stubs (een dorpje van 3000
-// inwoners, een jaartal-lijstje) met bijna geen uitgaande links, waardoor de
-// speedrun onspeelbaar wordt. We vragen daarom een handvol willekeurige
-// artikelen tegelijk op en kiezen degene met de meeste tekst (in bytes) —
-// een grover maar prima werkende indicatie dat een artikel genoeg inhoud en
-// links heeft om mee te racen.
-async function fetchWikiRandom() {
-  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=10&format=json&origin=*`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const titles = (data.query?.random || []).map((r) => r.title);
-  if (!titles.length) throw new Error(pick("No random article found", "Geen willekeurig artikel gevonden"));
-  if (titles.length === 1) return titles[0];
-
-  try {
-    const infoUrl = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&prop=info&titles=${encodeURIComponent(titles.join("|"))}&format=json&origin=*`;
-    const infoRes = await fetch(infoUrl);
-    const infoData = await infoRes.json();
-    const pages = Object.values(infoData.query?.pages || {});
-    pages.sort((a, b) => (b.length || 0) - (a.length || 0));
-    return (pages[0] && pages[0].title) || titles[0];
-  } catch (e) {
-    return titles[0];
-  }
-}
-
-async function fetchWikiSearch(query) {
-  if (!query) return [];
-  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=6&namespace=0&format=json&origin=*`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return data[1] || [];
-}
-
-async function fetchWikiPage(title) {
-  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&redirects=1&prop=text&format=json&origin=*`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.info);
-  return { title: data.parse.title, html: data.parse.text["*"] };
-}
-
-// Korte inleiding (alleen de eerste alinea's) van een artikel — gebruikt voor
-// de hover-info bij het doelartikel én voor de hover-previews op elke blauwe
-// link in het artikel (net als Wikipedia's eigen "paginavoorbeelden").
-async function fetchWikiIntro(title) {
-  const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const page = Object.values(data.query?.pages || {})[0];
-  if (!page || page.missing !== undefined) throw new Error(pick("Article not found", "Artikel niet gevonden"));
-  return (page.extract || "").trim();
-}
-
-async function fetchWikiPreviewInfo(title) {
-  if (!title) return null;
-  try {
-    const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=300&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const page = Object.values(data.query?.pages || {})[0];
-    if (!page || page.missing !== undefined) return null;
-    return {
-      extract: (page.extract || "").trim(),
-      thumbnail: page.thumbnail?.source || null
-    };
-  } catch (e) {
-    return null;
-  }
-}
-
-// ---------- Hover-preview op elke interne link ----------
-// Gecachet per titel zodat je bij het opnieuw hoveren over dezelfde link (of
-// een link naar een artikel dat al eens is opgezocht) niet steeds opnieuw
-// hoeft te wachten op de Wikipedia-API.
 const wsIntroCache = new Map();
 let wsPreviewTimer = null;
 let wsPreviewToken = 0;
@@ -120,20 +46,20 @@ function truncateIntro(text, max) {
 async function showLinkPreview(a, title) {
   const myToken = ++wsPreviewToken;
   const el = ensureLinkPreviewEl();
-  el.innerHTML = `<div class="ws-link-preview-title">${title}</div><div class="ws-link-preview-body">${pick("Loading…", "Laden…")}</div>`;
+  el.innerHTML = `<div class="ws-link-preview-title">${escapeHtml(title)}</div><div class="ws-link-preview-body">${pick("Loading…", "Laden…")}</div>`;
   el.classList.add("ws-visible");
   positionLinkPreview(el, a.getBoundingClientRect());
 
   let text = wsIntroCache.get(title);
   if (text === undefined) {
     try {
-      text = await fetchWikiIntro(title);
+      text = await fetchWikiIntro(ws.lang, title);
     } catch (e) {
       text = null;
     }
     wsIntroCache.set(title, text);
   }
-  if (myToken !== wsPreviewToken) return; // muis is inmiddels ergens anders
+  if (myToken !== wsPreviewToken) return;
 
   const body = el.querySelector(".ws-link-preview-body");
   if (body) body.textContent = text ? truncateIntro(text, 420) : pick("No summary available.", "Geen samenvatting beschikbaar.");
@@ -142,7 +68,7 @@ async function showLinkPreview(a, title) {
 
 function hideLinkPreview() {
   clearTimeout(wsPreviewTimer);
-  wsPreviewToken++; // annuleert een eventuele lopende fetch
+  wsPreviewToken++;
   document.getElementById("wsLinkPreview")?.classList.remove("ws-visible");
 }
 
@@ -157,8 +83,6 @@ function attachLinkPreview(a, title) {
   });
 }
 
-// ---------- Klein toastje (herbruikt dezelfde stijl als de cheat-toast) ----------
-
 function wsToast(text) {
   document.getElementById("wsToast")?.remove();
   const el = document.createElement("div");
@@ -169,11 +93,7 @@ function wsToast(text) {
   setTimeout(() => el.remove(), 2400);
 }
 
-// ---------- Autocomplete ----------
-// `onChange` vuurt bij ELKE geldige invoer (niet alleen bij het kiezen uit de
-// lijst) — dat was de kern van een bug waarbij een getypte titel die nooit uit
-// de dropdown werd aangeklikt onzichtbaar bleef voor de host-sync en de
-// start-knop.
+// Keep typed values in sync even when no autocomplete option is selected.
 function attachWikiAutocomplete(inputId, onChange) {
   const input = document.getElementById(inputId);
   if (!input) return;
@@ -200,7 +120,7 @@ function attachWikiAutocomplete(inputId, onChange) {
 
     timeout = setTimeout(async () => {
       try {
-        const matches = await fetchWikiSearch(val);
+        const matches = await fetchWikiSearch(ws.lang, val);
         if (!matches.length) {
           dropdown.style.display = "none";
           return;
@@ -226,10 +146,7 @@ function attachWikiAutocomplete(inputId, onChange) {
   });
 }
 
-// ---------- URL-routing ----------
-// Zelfde patroon als GeoGuesser: "/wikispeedrun" is het menu, en
-// "/wikispeedrun/<CODE>" joint direct een lobby als je een gedeelde link
-// opent — een echte, deelbare/ververbare URL i.p.v. de oude "?lobby="-query.
+// Shared lobby links use /wikispeedrun/<CODE>.
 function setUrlPath(path) {
   history.replaceState(null, "", path);
 }
@@ -238,11 +155,7 @@ function setLobbyInUrl(code) {
 }
 function clearLobbyFromUrl() { setUrlPath("/wikispeedrun"); }
 
-// ---------- Opruimen ----------
-// Zonder dit blijft, als je tijdens een run wegnavigeert (bv. via de "Alle
-// spellen"-knop of de browser-terugknop), de Ctrl+F-blokkade voor altijd
-// actief op de rest van de site, blijft de klok-interval doortikken en blijft
-// de multiplayer-verbinding openstaan.
+// Release global race controls and the room when navigating away.
 function teardown() {
   if (ws?.room) { try { ws.room.leave(); } catch (e) {} }
   if (ws?.cleanupCheat) ws.cleanupCheat();
@@ -255,16 +168,19 @@ function teardown() {
 
 export function cleanupWikiSpeedrun() {
   teardown();
+  actionController?.destroy();
+  actionController = null;
 }
 function handleExternalNavigate() {
   if (!location.pathname.startsWith("/wikispeedrun")) teardown();
 }
 
-// ---------- Entry point ----------
 
 export function renderWikiSpeedrun(container, routeSegments = []) {
+  actionController?.destroy();
   app = container;
   teardown();
+  actionController = new ActionController(app, WIKI_ACTIONS);
 
   const [code] = routeSegments;
   ws = {
@@ -290,7 +206,6 @@ export function renderWikiSpeedrun(container, routeSegments = []) {
   else showMenu();
 }
 
-// ---------- Menu ----------
 
 function showMenu() {
   clearLobbyFromUrl();
@@ -300,29 +215,28 @@ function showMenu() {
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("bookOpen", { size: "sm" })} WikiSpeedrun</h2><div class="desc">${pick("Race from the start article to the target using links only.", "Race van het startartikel naar het eindartikel, enkel via links.")}</div></div></div>
     <div class="game-mode-grid">
-    <button type="button" class="card game-mode-card" onclick="wsShowSoloSetup()">
+    <button type="button" class="card game-mode-card" data-action="show-solo-setup">
       ${icon("flag", { size: "lg" })}
       <h3>${pick("Play solo", "Solo spelen")}</h3>
       <p>${pick("Choose or draw two articles and race against the clock.", "Kies of loot een start- en eindartikel en race in je eentje tegen de klok.")}</p>
     </button>
-    <button type="button" class="card game-mode-card" ${mpAvailable ? 'onclick="wsShowMultiplayerMenu()"' : "disabled"}>
+    <button type="button" class="card game-mode-card" ${mpAvailable ? 'data-action="show-multiplayer-menu"' : "disabled"}>
       ${icon("users", { size: "lg" })}
       <h3>Multiplayer</h3>
       <p>${mpAvailable ? pick("Race your friends in the same lobby.", "Race tegelijk met vrienden in dezelfde lobby.") : pick("Multiplayer is not configured yet.", "Multiplayer is nog niet ingesteld.")}</p>
     </button></div>`;
 }
-window.wsShowMenu = showMenu;
+const wsShowMenu = showMenu;
 
-// ---------- Solo ----------
 
-window.wsShowSoloSetup = function () {
+const wsShowSoloSetup = function () {
   ws.gameState = "soloSetup";
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("flag", { size: "sm" })} ${pick("Solo setup", "Solo instellen")}</h2><div class="desc">${pick("Choose a start and target article.", "Kies een start- en eindartikel.")}</div></div></div>
     <div class="card" style="cursor:default; overflow:visible;">
       <label class="gg-label">${pick("Wikipedia language", "Wikipedia-taal")}</label>
-      <select id="wsLangSelect" onchange="wsSetLang(this.value)" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
+      <select id="wsLangSelect" data-change-action="set-language" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
         <option value="en" ${ws.lang === "en" ? "selected" : ""}>English</option>
         <option value="nl" ${ws.lang === "nl" ? "selected" : ""}>Nederlands</option>
       </select>
@@ -331,8 +245,8 @@ window.wsShowSoloSetup = function () {
       <div id="wsSoloError" class="small" style="color:var(--danger); margin-top:10px; display:none;"></div>
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
-      <button class="btn primary" onclick="wsStartSolo()">Start ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-menu">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" data-action="start-solo">Start ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; updateSetupPreview("wsStartPage", v); });
   attachWikiAutocomplete("wsEndPage", (v) => { ws.endPage = v; updateSetupPreview("wsEndPage", v); });
@@ -340,7 +254,7 @@ window.wsShowSoloSetup = function () {
   updateSetupPreview("wsEndPage", ws.endPage);
 };
 
-window.wsSetLang = function(lang) {
+const wsSetLang = function(lang) {
   ws.lang = lang;
   const sInput = document.getElementById("wsStartPage");
   const eInput = document.getElementById("wsEndPage");
@@ -353,18 +267,7 @@ window.wsSetLang = function(lang) {
   if (ws.isHost) scheduleSync();
 };
 
-async function resolveWikiTitle(title) {
-  try {
-    const url = `https://${ws.lang || 'nl'}.wikipedia.org/w/api.php?action=query&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
-    const res = await fetch(url);
-    const data = await res.json();
-    const page = Object.values(data.query?.pages || {})[0];
-    if (page && page.title) return page.title;
-  } catch (e) {}
-  return title;
-}
-
-window.wsStartSolo = async function () {
+const wsStartSolo = async function () {
   const start = (document.getElementById("wsStartPage")?.value || "").trim();
   const end = (document.getElementById("wsEndPage")?.value || "").trim();
   const errEl = document.getElementById("wsSoloError");
@@ -372,21 +275,21 @@ window.wsStartSolo = async function () {
   if (!start || !end) return showError(pick("Choose both a start and target article.", "Kies eerst een start- en eindartikel."));
   if (start.toLowerCase() === end.toLowerCase()) return showError(pick("Start and target article must be different.", "Start- en eindartikel moeten verschillend zijn."));
 
-  ws.startPage = await resolveWikiTitle(start);
-  ws.endPage = await resolveWikiTitle(end);
+  ws.startPage = await resolveWikiTitle(ws.lang, start);
+  ws.endPage = await resolveWikiTitle(ws.lang, end);
   ws.isHost = false;
   ws.room = null;
   startRun();
 };
 
-// Gedeeld tussen de solo-instellingen en de host-instellingen in de lobby.
+// Render the shared start and target article controls.
 function articleFieldHtml(id, label, value) {
   return `
     <label class="gg-label" ${id === "wsEndPage" ? 'style="margin-top:16px;"' : ""}>${label}</label>
     <div style="display:flex; gap:8px; position:relative;">
       <input id="${id}" type="text" autocomplete="off" placeholder="${pick("Search or enter a title…", "Zoek of typ een titel…")}" value="${value || ""}"
         style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
-      <button class="btn" onclick="wsSetRandom('${id}')" title="${pick("Random article", "Willekeurig artikel")}">${icon("shuffle", { size: "sm" })} ${pick("Random", "Willekeurig")}</button>
+      <button class="btn" data-action="set-random" data-input-id="${escapeHtml(id)}" title="${pick("Random article", "Willekeurig artikel")}">${icon("shuffle", { size: "sm" })} ${pick("Random", "Willekeurig")}</button>
     </div>
     <div id="${id}Preview" class="ws-setup-preview" style="display:none;"></div>`;
 }
@@ -401,7 +304,7 @@ async function updateSetupPreview(id, title) {
   }
   previewEl.style.display = "flex";
   previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">${pick("Loading…", "Laden…")}</div>`;
-  const info = await fetchWikiPreviewInfo(title);
+  const info = await fetchWikiPreviewInfo(ws.lang, title);
   if (!info) {
     previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">${pick("No information found.", "Geen info gevonden.")}</div>`;
     return;
@@ -415,14 +318,14 @@ async function updateSetupPreview(id, title) {
   `;
 }
 
-window.wsSetRandom = async function (inputId) {
+const wsSetRandom = async function (inputId) {
   const input = document.getElementById(inputId);
   if (!input) return;
   const prev = input.value;
   input.disabled = true;
   input.value = pick("Searching…", "Zoeken…");
   try {
-    const title = await fetchWikiRandom();
+    const title = await fetchWikiRandom(ws.lang);
     input.value = title;
     if (inputId === "wsStartPage") ws.startPage = title; else ws.endPage = title;
     updateSetupPreview(inputId, title);
@@ -434,48 +337,47 @@ window.wsSetRandom = async function (inputId) {
   input.disabled = false;
 };
 
-// ---------- Multiplayer: menu ----------
 
-window.wsShowMultiplayerMenu = function () {
+const wsShowMultiplayerMenu = function () {
   if (!hasMultiplayerConfig()) return showMenu();
   ws.gameState = "mpMenu";
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} WikiSpeedrun multiplayer</h2><div class="desc">${pick("Race your friends in real time.", "Race tegelijk met vrienden.")}</div></div></div>
-    <div class="game-mode-grid"><button type="button" class="card game-mode-card" onclick="wsShowHostSetup()">
+    <div class="game-mode-grid"><button type="button" class="card game-mode-card" data-action="show-host-setup">
       ${icon("plus", { size: "lg" })}
       <h3>${pick("Host a lobby", "Lobby hosten")}</h3>
       <p>${pick("Create a lobby and choose the start and target together.", "Maak een lobby aan en kies straks samen het start- en eindartikel.")}</p>
     </button>
-    <button type="button" class="card game-mode-card" onclick="wsShowJoinSetup()">
+    <button type="button" class="card game-mode-card" data-action="show-join-setup">
       ${icon("key", { size: "lg" })}
       <h3>${pick("Join a lobby", "Lobby joinen")}</h3>
       <p>${pick("Enter the code you received from a friend.", "Vul hier de code in die je van een vriend kreeg.")}</p>
     </button></div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
+      <button class="btn" data-action="show-menu">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
     </div>`;
 };
 
 function nameFieldHtml() {
   return `
     <label class="gg-label">${pick("Your name", "Jouw naam")}</label>
-    <input id="wsNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${ws.name || ""}"
+    <input id="wsNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${escapeHtml(ws.name || "")}"
       style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />`;
 }
 
-window.wsShowHostSetup = function () {
+const wsShowHostSetup = function () {
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} ${pick("Host a lobby", "Lobby hosten")}</h2><div class="desc">${pick("Choose your name and create the lobby.", "Kies je naam en maak de lobby aan.")}</div></div></div>
     <div class="card" style="cursor:default;">${nameFieldHtml()}</div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="wsHostLobby()">${pick("Create room", "Kamer aanmaken")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-multiplayer-menu">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" data-action="host-lobby">${pick("Create room", "Kamer aanmaken")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 };
 
-window.wsHostLobby = function () {
+const wsHostLobby = function () {
   const name = (document.getElementById("wsNameInput")?.value || "").trim() || pick("Player", "Speler");
   saveProfile({ ...getProfile(), name });
   ws.name = name;
@@ -483,7 +385,7 @@ window.wsHostLobby = function () {
   enterLobby(randomRoomCode());
 };
 
-window.wsShowJoinSetup = function () {
+const wsShowJoinSetup = function () {
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} ${pick("Join a lobby", "Lobby joinen")}</h2><div class="desc">${pick("Enter your name and lobby code.", "Vul je naam en de lobby-code in.")}</div></div></div>
@@ -494,12 +396,12 @@ window.wsShowJoinSetup = function () {
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; text-transform:uppercase;" />
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="wsSubmitJoin()">${pick("Join", "Meedoen")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-multiplayer-menu">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" data-action="submit-join">${pick("Join", "Meedoen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 };
 
-window.wsSubmitJoin = function () {
+const wsSubmitJoin = function () {
   const name = (document.getElementById("wsNameInput")?.value || "").trim() || pick("Player", "Speler");
   const code = (document.getElementById("wsCodeInput")?.value || "").trim().toUpperCase();
   if (!code) return wsToast(pick("Enter a lobby code.", "Vul een lobby-code in."));
@@ -509,8 +411,7 @@ window.wsSubmitJoin = function () {
   enterLobby(code);
 };
 
-// Binnenkomst via een gedeelde link ("/wikispeedrun/CODE"): eerst naam vragen,
-// net als GeoGuesser's auto-join-scherm.
+// Ask for a name before joining a shared lobby link.
 function joinByCode(code) {
   ws.gameState = "autoJoin";
   app.innerHTML = `
@@ -518,11 +419,11 @@ function joinByCode(code) {
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} ${pick("Join a lobby", "Lobby joinen")}</h2><div class="desc">${pick("You were invited to lobby", "Je bent uitgenodigd voor lobby")} <strong>${code}</strong>.</div></div></div>
     <div class="card" style="cursor:default;">${nameFieldHtml()}</div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="wsAutoJoin('${code}')">${pick("Join", "Joinen")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-menu">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn primary" data-action="auto-join" data-code="${escapeHtml(code)}">${pick("Join", "Joinen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 }
-window.wsAutoJoin = function (code) {
+const wsAutoJoin = function (code) {
   const name = (document.getElementById("wsNameInput")?.value || "").trim() || pick("Player", "Speler");
   saveProfile({ ...getProfile(), name });
   ws.name = name;
@@ -530,7 +431,6 @@ window.wsAutoJoin = function (code) {
   enterLobby(code);
 };
 
-// ---------- Lobby ----------
 
 async function enterLobby(code) {
   code = code.toUpperCase();
@@ -538,10 +438,6 @@ async function enterLobby(code) {
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${code}</h2><div class="desc">${pick("Connecting…", "Verbinden…")}</div></div></div>`;
 
-  // Belangrijkste fix in dit bestand: de room werd voorheen nooit echt
-  // verbonden (geen connect()-aanroep), en de naam werd als een object
-  // i.p.v. een string doorgegeven — daardoor deed multiplayer hier
-  // helemaal niets.
   ws.room = new GameRoom("wiki_" + code, ws.playerId, ws.name);
   try {
     await ws.room.connect();
@@ -552,7 +448,7 @@ async function enterLobby(code) {
         ${icon("warning", { size: "xl" })}
         <h3>${pick("Could not connect", "Kon niet verbinden")}</h3>
         <p>${e.message || pick("Unknown error.", "Onbekende fout.")}</p>
-        <button class="btn primary" onclick="wsShowMultiplayerMenu()" style="margin-top:10px;">${pick("Back", "Terug")}</button>
+        <button class="btn primary" data-action="show-multiplayer-menu" style="margin-top:10px;">${pick("Back", "Terug")}</button>
       </div>`;
     return;
   }
@@ -560,9 +456,6 @@ async function enterLobby(code) {
   ws.gameState = "lobby";
   setLobbyInUrl(code);
 
-  // Spelerslijst kwam voorheen via `room.on("update", ...)` binnen, maar
-  // GameRoom stuurt presence-updates via `onPresence`, niet via `on()` —
-  // die listener vuurde dus nooit.
   ws.room.onPresence((players) => { ws.players = players; renderPlayerList(); });
   ws.room.on("settings", (s) => {
     ws.startPage = s.startPage;
@@ -600,14 +493,14 @@ function drawLobby() {
       <h3 style="font-size:32px; letter-spacing:6px; margin:6px 0;">${ws.room.code}</h3>
       <div class="gg-share-row">
         <input class="gg-share-input" id="wsShareUrl" value="${shareUrl}" readonly />
-        <button class="btn" onclick="wsCopyLink()">${icon("clipboard", { size: "sm" })} ${pick("Copy", "Kopieer")}</button>
+        <button class="btn" data-action="copy-link">${icon("clipboard", { size: "sm" })} ${pick("Copy", "Kopieer")}</button>
       </div>
     </div>
     <div class="card" style="cursor:default; margin-top:12px; overflow:visible;">
       <h3 style="margin-bottom:10px;">${icon("flag", { size: "sm" })} Route</h3>
       ${ws.isHost
         ? `<label class="gg-label">${pick("Language", "Taal")}</label>
-           <select id="wsLangSelect" onchange="wsSetLang(this.value)" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
+           <select id="wsLangSelect" data-change-action="set-language" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
              <option value="en" ${ws.lang === "en" ? "selected" : ""}>English</option>
              <option value="nl" ${ws.lang === "nl" ? "selected" : ""}>Nederlands</option>
            </select>
@@ -616,8 +509,8 @@ function drawLobby() {
     </div>
     <div class="guesslist" style="margin-top:14px;" id="wsPlayerList"></div>
     <div class="footerrow">
-      <button class="btn" onclick="wsLeaveLobby()">${icon("chevronLeft", { size: "sm" })} ${pick("Leave lobby", "Lobby verlaten")}</button>
-      ${ws.isHost ? `<button class="btn primary" onclick="wsStartGame()">${pick("Start game", "Start spel")} ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
+      <button class="btn" data-action="leave-lobby">${icon("chevronLeft", { size: "sm" })} ${pick("Leave lobby", "Lobby verlaten")}</button>
+      ${ws.isHost ? `<button class="btn primary" data-action="start-game">${pick("Start game", "Start spel")} ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
     </div>`;
 
   if (ws.isHost) {
@@ -634,7 +527,7 @@ function updateGuestRouteView() {
   if (el) el.innerHTML = `${pick("Language", "Taal")}: <strong>${ws.lang === "en" ? "English" : "Nederlands"}</strong><br>${pick("Start", "Start")}: <strong>${ws.startPage || "..."}</strong><br>${pick("Target", "Eind")}: <strong>${ws.endPage || "..."}</strong>`;
 }
 
-window.wsCopyLink = function () {
+const wsCopyLink = function () {
   const input = document.getElementById("wsShareUrl");
   if (!input) return;
   navigator.clipboard.writeText(input.value).catch(() => { input.select(); document.execCommand("copy"); });
@@ -645,24 +538,21 @@ window.wsCopyLink = function () {
   }
 };
 
-window.wsLeaveLobby = function () {
+const wsLeaveLobby = function () {
   teardown();
   ws.room = null;
   showMenu();
 };
 
-window.wsStartGame = async function () {
-  // Rechtstreeks uit de velden lezen i.p.v. te vertrouwen op ws.startPage/
-  // endPage: die werden voorheen alleen bijgewerkt als je iets uit de
-  // dropdown koos, dus een getypte-maar-niet-aangeklikte titel werd hier
-  // altijd als "leeg" gezien.
+const wsStartGame = async function () {
+  // Read the fields directly so typed values are never stale.
   let start = (document.getElementById("wsStartPage")?.value || ws.startPage || "").trim();
   let end = (document.getElementById("wsEndPage")?.value || ws.endPage || "").trim();
   if (!start || !end) return wsToast(pick("Choose a start and target article.", "Kies eerst een start- en eindartikel."));
   if (start.toLowerCase() === end.toLowerCase()) return wsToast(pick("Start and target must be different.", "Start en eind moeten verschillend zijn."));
   
-  start = await resolveWikiTitle(start);
-  end = await resolveWikiTitle(end);
+  start = await resolveWikiTitle(ws.lang, start);
+  end = await resolveWikiTitle(ws.lang, end);
 
   ws.startPage = start;
   ws.endPage = end;
@@ -674,12 +564,11 @@ function renderPlayerList() {
   if (!list) return;
   list.innerHTML = ws.players.map((p) => `
     <div class="gitem">
-      <div class="name">${icon("user", { size: "sm" })} ${p.name || pick("Player", "Speler")}${p.playerId === ws.playerId ? pick(" (you)", " (jij)") : ""}</div>
+      <div class="name">${icon("user", { size: "sm" })} ${escapeHtml(p.name || pick("Player", "Speler"))}${p.playerId === ws.playerId ? pick(" (you)", " (jij)") : ""}</div>
       <div></div><div></div><div></div>
     </div>`).join("");
 }
 
-// ---------- Race ----------
 
 async function startRun() {
   ws.gameState = "playing";
@@ -717,7 +606,7 @@ async function startRun() {
       <div class="ws-run-timer" id="wsTimer">00:00</div>
       <div class="ws-run-clicks" style="display:flex; align-items:center; gap:12px;">
         <div>Clicks: <strong id="wsClicks">0</strong></div>
-        <button class="btn small" onclick="wsGiveUp()">${icon("flag", { size: "sm" })} ${pick("Give up", "Geef op")}</button>
+        <button class="btn small" data-action="give-up">${icon("flag", { size: "sm" })} ${pick("Give up", "Geef op")}</button>
       </div>
     </div>
     <div class="ws-trail-bar" id="wsTrailBar"></div>
@@ -819,14 +708,12 @@ async function startRun() {
   await loadArticle(ws.startPage);
 }
 
-// Haalt alleen de inleidende alinea('s) van het doelartikel op voor de
-// hover-info — los van loadArticle() zodat dit niet de eigenlijke race
-// vertraagt en gewoon op de achtergrond kan bijladen.
+// Load the goal preview without blocking the race.
 async function loadGoalIntro() {
   let htmlDrawer = pick("No summary available.", "Geen samenvatting beschikbaar.");
   let htmlPopover = pick("No summary available.", "Geen samenvatting beschikbaar.");
   try {
-    const info = await fetchWikiPreviewInfo(ws.endPage);
+    const info = await fetchWikiPreviewInfo(ws.lang, ws.endPage);
     if (info) {
       htmlDrawer = `
         ${info.thumbnail ? `<img src="${info.thumbnail}" alt="${ws.endPage}" />` : ""}
@@ -846,8 +733,7 @@ async function loadGoalIntro() {
   if (elPopover) elPopover.textContent = htmlPopover;
 }
 
-// Balkje met de route die je tot nu toe hebt afgelegd (de links die je hebt
-// gebruikt), zodat je kunt zien waar je vandaan komt tijdens het spelen.
+// Show the article path followed during the run.
 function renderTrail() {
   const bar = document.getElementById("wsTrailBar");
   if (!bar) return;
@@ -858,9 +744,7 @@ function renderTrail() {
   bar.scrollLeft = bar.scrollWidth;
 }
 
-// Bouwt zelf een inhoudsopgave op basis van de h2/h3-kopjes in het artikel
-// (Wikipedia's parse-API levert die niet meer kant-en-klaar mee), en zet 'm
-// vóór de eerste sectiekop — precies waar Wikipedia 'm zelf ook toont.
+// Rebuild the table of contents because the parse API omits its client-rendered one.
 function buildTableOfContents(bodyEl) {
   if (!bodyEl || bodyEl.querySelector(".toc, #toc")) return; // al aanwezig, niet dubbel opbouwen
   const headings = Array.from(bodyEl.querySelectorAll("h2, h3"));
@@ -909,7 +793,7 @@ function buildTableOfContents(bodyEl) {
   headings[0].insertAdjacentElement("beforebegin", tocEl);
 }
 
-window.wsHandleLinkClick = function (e, targetTitle) {
+const wsHandleLinkClick = function (e, targetTitle) {
   e.preventDefault();
   if (ws.endTime) return; // al klaar
 
@@ -929,7 +813,7 @@ async function loadArticle(title) {
   window.scrollTo(0, 0);
 
   try {
-    const page = await fetchWikiPage(title);
+    const page = await fetchWikiPage(ws.lang, title);
 
     if (ws.visited[ws.visited.length - 1] !== page.title) ws.visited.push(page.title);
     renderTrail();
@@ -947,16 +831,9 @@ async function loadArticle(title) {
         <div class="wiki-body">${page.html}</div>
       </div>`;
 
-    // Alleen de navigatieboxen onderaan (die vaak enorm zijn) en de nutteloze
-    // "[bewerken]"-linkjes weghalen. Infobox, inhoudsopgave en de
-    // bronnenlijst blijven nu gewoon staan — die hoorden juist bij een echte
-    // Wikipedia-pagina en werden hiervoor per ongeluk verwijderd.
+    // Remove navigation boxes and edit links while preserving article content.
     container.querySelectorAll(".navbox, .mw-editsection").forEach((el) => el.remove());
 
-    // Wikipedia's "parse"-API levert bij de moderne skin geen kant-en-klare
-    // inhoudsopgave meer mee in de HTML (die wordt tegenwoordig door
-    // Wikipedia's eigen frontend-JS opgebouwd, niet in de statische parse-
-    // output) — dus bouwen we er zelf een op basis van de kopjes.
     buildTableOfContents(container.querySelector(".wiki-body"));
 
     // Interne links kapen zodat een klik een nieuwe ronde in het spel start i.p.v. een echte navigatie.
@@ -979,7 +856,7 @@ async function loadArticle(title) {
         try {
           targetTitle = decodeURIComponent(targetTitle);
         } catch (e) {
-          // URI malformed (bijv. een %-teken dat niet goed encoded is)
+          // Ignore malformed encoded titles.
         }
         targetTitle = targetTitle.replace(/_/g, " ").split("#")[0];
         if (targetTitle) {
@@ -988,15 +865,9 @@ async function loadArticle(title) {
           attachLinkPreview(a, targetTitle);
         }
       } else if (href && href.startsWith("#")) {
-        // Anker binnen dezelfde pagina (inhoudsopgave, voetnoot-terugverwijzing)
-        // — laat gewoon native scrollen, telt niet als klik in de race.
+        // Same-page anchors scroll normally and do not count as race clicks.
       } else if (href) {
-        // Externe links en speciale namespaces (Bestand:, Categorie:) mogen
-        // best werken — een bronvermelding aanklikken helpt je toch niet
-        // richting het doelartikel — maar dan wel in een nieuw tabblad, zodat
-        // je lopende run niet verloren gaat. Relatieve Wikipedia-paden (zoals
-        // "/wiki/Bestand:...") wijzen anders naar ons eigen domein i.p.v.
-        // wikipedia.org, dus die maken we eerst absoluut.
+        // Open external and special-namespace links separately to preserve the run.
         a.href = href.startsWith("/") ? `https://${ws.lang || 'nl'}.wikipedia.org${href}` : href;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
@@ -1009,7 +880,7 @@ async function loadArticle(title) {
       <div style="text-align:center; margin-top:50px;">
         <h2 style="color:var(--danger);">${pick("Error loading article", "Fout bij laden van artikel")}: ${title}</h2>
         <p style="color:var(--text-dim); margin-bottom:16px;">${e.message || String(e)}</p>
-        ${prevTitle ? `<button class="btn" onclick="wsHandleLinkClick(event, '${prevTitle}')">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>` : ""}
+        ${prevTitle ? `<button class="btn" data-action="article-back" data-title="${escapeHtml(prevTitle)}">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>` : ""}
       </div>`;
   }
 }
@@ -1030,12 +901,12 @@ function winGame(finalTitle) {
         <h1>${pick("Finished!", "Gehaald!")}</h1>
         <p>${pick("You reached", "Je hebt")} <strong>${ws.endPage}</strong> ${pick("in", "bereikt in")} <strong>${ws.clicks}</strong> clicks!</p>
         <p class="small">${pick("Time", "Tijd")}: ${(timeMs / 1000).toFixed(1)} ${pick("seconds", "seconden")}</p>
-        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back to", "Terug naar")} ${ws.room ? 'lobby' : 'menu'}</button>
+        <button class="btn primary" data-action="back-to-menu">${icon("chevronLeft", { size: "sm" })} ${pick("Back to", "Terug naar")} ${ws.room ? 'lobby' : 'menu'}</button>
       </div>`;
   }
 }
 
-window.wsBackToMenu = function () {
+const wsBackToMenu = function () {
   if (ws.room) {
     ws.gameState = "lobby";
     drawLobby();
@@ -1045,7 +916,7 @@ window.wsBackToMenu = function () {
   }
 };
 
-window.wsGiveUp = function () {
+const wsGiveUp = function () {
   if (!confirm(pick("Are you sure you want to give up?", "Weet je zeker dat je wilt opgeven?"))) return;
   
   ws.endTime = Date.now();
@@ -1061,7 +932,7 @@ window.wsGiveUp = function () {
         ${icon("warning", { size: "xl" })}
         <h1>${pick("Gave up", "Opgegeven")}</h1>
         <p>${pick("You gave up after", "Je hebt de handdoek in de ring gegooid na")} <strong>${ws.clicks}</strong> clicks.</p>
-        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back to", "Terug naar")} ${ws.room ? 'lobby' : 'menu'}</button>
+        <button class="btn primary" data-action="back-to-menu">${icon("chevronLeft", { size: "sm" })} ${pick("Back to", "Terug naar")} ${ws.room ? 'lobby' : 'menu'}</button>
       </div>`;
   }
 };
@@ -1070,9 +941,7 @@ function renderScoreboard(msgPayload, type) {
   const board = document.getElementById("wsPlayerProgress");
   if (!board) return;
 
-  // GameRoom.send() stempelt de afzender als `from`, niet als `playerId` —
-  // hierdoor werd hier voorheen nooit een speler gevonden en bleef het
-  // scorebord altijd leeg.
+  // GameRoom identifies message senders through `from`.
   if (msgPayload && msgPayload.from) {
     const p = ws.players.find((x) => x.playerId === msgPayload.from);
     if (p) {
@@ -1099,7 +968,27 @@ function renderScoreboard(msgPayload, type) {
 
   board.innerHTML = sorted.map((p) => `
     <div class="ws-sidebar-player ${p.finished ? "ws-finished" : ""}">
-      <strong>${p.name || pick("Player", "Speler")}</strong>
-      <div class="small">${p.finished ? `${pick("Finished!", "Klaar!")} (${p.finalClicks} clicks)` : (p.progress ? `${p.progress} (${p.progressClicks} clicks)` : pick("Start page…", "Startpagina…"))}</div>
+      <strong>${escapeHtml(p.name || pick("Player", "Speler"))}</strong>
+      <div class="small">${p.finished ? `${pick("Finished!", "Klaar!")} (${escapeHtml(p.finalClicks)} clicks)` : (p.progress ? `${escapeHtml(p.progress)} (${escapeHtml(p.progressClicks)} clicks)` : pick("Start page…", "Startpagina…"))}</div>
     </div>`).join("");
 }
+
+const WIKI_ACTIONS = {
+  "show-menu": () => wsShowMenu(),
+  "show-solo-setup": () => wsShowSoloSetup(),
+  "show-multiplayer-menu": () => wsShowMultiplayerMenu(),
+  "set-language": (control) => wsSetLang(control.value),
+  "start-solo": () => wsStartSolo(),
+  "set-random": (control) => wsSetRandom(control.dataset.inputId),
+  "show-host-setup": () => wsShowHostSetup(),
+  "show-join-setup": () => wsShowJoinSetup(),
+  "host-lobby": () => wsHostLobby(),
+  "submit-join": () => wsSubmitJoin(),
+  "auto-join": (control) => wsAutoJoin(control.dataset.code),
+  "copy-link": () => wsCopyLink(),
+  "leave-lobby": () => wsLeaveLobby(),
+  "start-game": () => wsStartGame(),
+  "give-up": () => wsGiveUp(),
+  "article-back": (control, event) => wsHandleLinkClick(event, control.dataset.title),
+  "back-to-menu": () => wsBackToMenu(),
+};

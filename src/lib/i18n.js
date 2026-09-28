@@ -118,4 +118,4 @@ export function localizedCountryCandidates(pool) {
   };
 }
 
-document.documentElement.lang = getLanguage();
+if (typeof document !== "undefined") document.documentElement.lang = getLanguage();

@@ -1,9 +1,8 @@
-import { GEO_POINTS, LOCATION_SETS } from "../data/geoPoints.js";
 import { ALL_NAMES, haversineKm, attachAutocomplete, icon, PLAYER_COLORS } from "../core.js";
 import { topbar } from "../lib/layout.js";
-import { countryName, findCountryByAnyName, localizedCountryCandidates, pick } from "../lib/i18n.js";
-import { DARK_MAP_STYLE } from "./geoguesser/map-style.js";
+import { countryName, findCountryByAnyName, getLanguage, localizedCountryCandidates, pick } from "../lib/i18n.js";
 import { buildDailyShareText, getDailyKey, getDailyResult, getStreakBest, hashStringToSeed, mulberry32, saveDailyResult, scoreForDistance, setStreakBest } from "./geoguesser/challenge-utils.js";
+import { bonusLabel, randomPowerup, randomSabotage } from "./geoguesser/bonuses.js";
 import {
   hasGoogleMapsKey,
   loadGoogleMaps,
@@ -18,20 +17,20 @@ import {
 } from "../lib/multiplayer.js";
 import { getProfile, saveProfile } from "../lib/profile.js";
 import { adSlotHtml, initAdSlots } from "../lib/ads.js";
+import { escapeHtml } from "../lib/html.js";
+import { ActionController } from "../lib/actions.js";
+import { buildPointFn, difficultySettingHtml, locationSetLabel, locationSettingHtml, readDifficultySetting, readLocationSetting, readTimerSetting, timerSettingHtml, wireDifficultySetting, wireLocationSetting, wireTimerSetting } from "./geoguesser/settings.js";
 
 let app;
 let gg = null;
+let actionController = null;
+let pendingReconnect = null;
+let soloReplayPrefill = null;
 
-// ---------- Geheime hint (alleen voor mij) ----------
-// Typ dit woord ergens tijdens een ronde (het maakt niet uit waar de focus
-// staat) om een klein antwoordje in de hoek aan/uit te zetten. Niemand
-// anders komt hier per ongeluk achter — de knop bestaat nergens in de UI.
-// Listener staat op de capture-fase van window, zodat ook een handler die
-// ergens anders stopPropagation() aanroept 'm niet kan blokkeren.
 const GG_CHEAT_WORD = "xyzzy";
 let ggCheatBuffer = "";
 let ggCheatOn = false;
-window.addEventListener("keydown", (e) => {
+function handleCheatKeydown(e) {
   if (!e.key || e.key.length !== 1 || !/[a-z]/i.test(e.key)) return;
   ggCheatBuffer = (ggCheatBuffer + e.key.toLowerCase()).slice(-GG_CHEAT_WORD.length);
   if (ggCheatBuffer === GG_CHEAT_WORD) {
@@ -40,11 +39,8 @@ window.addEventListener("keydown", (e) => {
     updateCheatHint();
     ggCheatToast(ggCheatOn ? icon("lockOpen", { size: "sm" }) : icon("lockClosed", { size: "sm" }));
   }
-}, true);
+}
 
-// Piepklein bevestigingsvinkje rechtsboven zodra je het woord typt, zodat je
-// weet dat het geschakeld is zelfs als je de hint zelf niet meteen ziet
-// (bv. omdat er nog geen ronde loopt). Verdwijnt vanzelf na een seconde.
 function ggCheatToast(symbol) {
   document.getElementById("ggCheatToast")?.remove();
   const el = document.createElement("div");
@@ -64,163 +60,6 @@ function updateCheatHint() {
   hint.className = "gg-cheat-hint";
   hint.textContent = gg.current.countryHint;
   wrap.appendChild(hint);
-}
-
-// Gedeelde speler-kleuren (PLAYER_COLORS) komen nu uit core.js i.p.v. een
-// eigen "snoep"-set hier.
-
-// ---------- Location set helpers ----------
-
-// All landen waar we punten voor hebben, gesorteerd — voor de "specifiek
-// land"-kiezer (solo én multiplayer).
-const ALL_GEO_COUNTRIES = Object.keys(GEO_POINTS).sort((a, b) => countryName(a).localeCompare(countryName(b)));
-const LOCATION_LABELS = {
-  world: ["Worldwide", "Hele wereld"], capitals: ["Capital cities", "Hoofdsteden"],
-  bigcities: ["Major cities", "Grote steden"], europe: ["Europe", "Europa"],
-  americas: ["The Americas", "Amerika's"], asia: ["Asia", "Azië"],
-  africa: ["Africa", "Afrika"], oceania: ["Oceania", "Oceanië"],
-  netherlands: ["The Netherlands", "Nederland"], landmarks: ["Famous landmarks", "Beroemde bezienswaardigheden"],
-};
-
-function locationPresetLabel(key, fallback) {
-  const labels = LOCATION_LABELS[key];
-  return labels ? pick(labels[0], labels[1]) : fallback;
-}
-
-// `loc` is ofwel een bestaande preset-key ("world", "europe", ...) ofwel
-// een object { type: "country", name } voor een door de speler gekozen land.
-function resolveLocationSet(loc) {
-  if (loc && typeof loc === "object" && loc.type === "country" && GEO_POINTS[loc.name]) {
-    return { label: `${icon("flag", { size: "sm" })} ${countryName(loc.name)}`, countries: [loc.name], onlyCapital: false };
-  }
-  return LOCATION_SETS[loc] || LOCATION_SETS["world"];
-}
-
-function locationSetLabel(loc) {
-  return resolveLocationSet(loc).label;
-}
-
-function buildPointFn(loc = "world", rng = Math.random) {
-  const set = resolveLocationSet(loc);
-  const eligible = set.countries.filter((c) => GEO_POINTS[c]?.length);
-  return function randomPoint() {
-    const country = eligible[Math.floor(rng() * eligible.length)];
-    const pts = GEO_POINTS[country];
-    if (set.onlyCapital) return { country, ...pts[0] };
-    const weighted = [];
-    pts.forEach((p, i) => { const w = i === 0 ? 2 : 1; for (let k = 0; k < w; k++) weighted.push(p); });
-    return { country, ...weighted[Math.floor(rng() * weighted.length)] };
-  };
-}
-
-// Herbruikbare "Locaties"-instelling: de bestaande presets plus een
-// "Specifiek land"-optie met een tweede dropdown van alle beschikbare landen.
-function locationSettingHtml(idPrefix, current) {
-  const isCountry = current && typeof current === "object" && current.type === "country";
-  const selectedKey = isCountry ? "country" : (current || "world");
-  const presetOptions = Object.entries(LOCATION_SETS)
-    .map(([key, s]) => `<option value="${key}" ${key === selectedKey ? "selected" : ""}>${locationPresetLabel(key, s.label)}</option>`)
-    .join("");
-  const countryOptions = ALL_GEO_COUNTRIES
-    .map((name) => `<option value="${name}" ${isCountry && current.name === name ? "selected" : ""}>${countryName(name)}</option>`)
-    .join("");
-  return `
-    <div class="gg-select-wrap"><select id="${idPrefix}LocationSet" class="gg-select">
-      ${presetOptions}
-      <option value="country" ${selectedKey === "country" ? "selected" : ""}>${pick("Specific country", "Specifiek land")}</option>
-    </select></div>
-    <div class="gg-select-wrap" id="${idPrefix}CountryWrap" style="margin-top:8px; ${selectedKey === "country" ? "" : "display:none;"}">
-      <select id="${idPrefix}CountrySelect" class="gg-select">${countryOptions}</select>
-    </div>`;
-}
-
-function wireLocationSetting(idPrefix) {
-  const sel = document.getElementById(`${idPrefix}LocationSet`);
-  const wrap = document.getElementById(`${idPrefix}CountryWrap`);
-  if (!sel || !wrap) return;
-  sel.addEventListener("change", () => {
-    wrap.style.display = sel.value === "country" ? "" : "none";
-  });
-}
-
-function readLocationSetting(idPrefix) {
-  const sel = document.getElementById(`${idPrefix}LocationSet`);
-  const val = sel?.value || "world";
-  if (val === "country") {
-    const name = document.getElementById(`${idPrefix}CountrySelect`)?.value;
-    return name ? { type: "country", name } : "world";
-  }
-  return val;
-}
-
-// ---------- Multiplayer round timer (host-configurable) ----------
-
-// ---------- Moeilijkheidsgraad + zwart-wit (gedeeld tussen solo en mp) ----------
-
-function difficultySettingHtml(idPrefix, difficulty, blackwhite) {
-  const d = difficulty || "free";
-  return `
-    <label class="gg-label" style="margin-top:16px;">${pick("Difficulty", "Moeilijkheidsgraad")}</label>
-    <div class="gg-pill-row" id="${idPrefix}DifficultyPills">
-      <button class="gg-pill-btn${d === "free" ? " active" : ""}" data-v="free">${pick("Move freely", "Vrij bewegen")}</button>
-      <button class="gg-pill-btn${d === "nomove" ? " active" : ""}" data-v="nomove">${pick("No moving", "Niet bewegen")}</button>
-      <button class="gg-pill-btn${d === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
-      <button class="gg-pill-btn${d === "gamble" ? " active" : ""}" data-v="gamble" title="${pick("Move freely, then bank or double your points after every round.", "Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.")}">${icon("chip", { size: "sm" })} ${pick("Gamble", "Gokken")}</button>
-    </div>
-    <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
-      <input type="checkbox" id="${idPrefix}BlackWhite" ${blackwhite ? "checked" : ""} /> ${pick("Black and white", "Zwart-wit")}
-    </label>`;
-}
-
-function wireDifficultySetting(idPrefix) {
-  const row = document.getElementById(`${idPrefix}DifficultyPills`);
-  if (!row) return;
-  row.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-v]"); if (!btn) return;
-    row.querySelectorAll(".gg-pill-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-  });
-}
-
-function readDifficultySetting(idPrefix) {
-  const btn = document.querySelector(`#${idPrefix}DifficultyPills .gg-pill-btn.active`);
-  return {
-    difficulty: btn ? btn.dataset.v : "free",
-    blackwhite: !!document.getElementById(`${idPrefix}BlackWhite`)?.checked,
-  };
-}
-
-function timerSettingHtml(idPrefix, seconds) {
-  const enabled = seconds != null;
-  const val = seconds || 60;
-  return `
-    <label class="gg-label" style="margin-top:16px;">${pick("Time limit per round", "Tijdslimiet per ronde")}</label>
-    <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap:wrap;">
-      <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
-        <input type="checkbox" id="${idPrefix}TimerEnabled" ${enabled ? "checked" : ""} />
-        ${pick("On", "Aan")}
-      </label>
-      <input type="number" id="${idPrefix}TimerSeconds" min="30" max="180" step="15" value="${val}"
-        ${enabled ? "" : "disabled"}
-        style="width:80px; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
-      <span class="small">${pick("seconds", "seconden")} (30–180)</span>
-    </div>`;
-}
-
-function wireTimerSetting(idPrefix) {
-  const checkbox = document.getElementById(`${idPrefix}TimerEnabled`);
-  const numInput = document.getElementById(`${idPrefix}TimerSeconds`);
-  if (!checkbox || !numInput) return;
-  checkbox.addEventListener("change", () => { numInput.disabled = !checkbox.checked; });
-}
-
-function readTimerSetting(idPrefix) {
-  const checkbox = document.getElementById(`${idPrefix}TimerEnabled`);
-  const numInput = document.getElementById(`${idPrefix}TimerSeconds`);
-  if (!checkbox || !checkbox.checked) return null;
-  let v = parseInt(numInput.value, 10);
-  if (Number.isNaN(v)) v = 60;
-  return Math.min(180, Math.max(30, v));
 }
 
 function clearRoundTimer() {
@@ -278,15 +117,14 @@ function onRoundTimeUp() {
   }
 }
 
-// Ronde niet op tijd afgemaakt (solo/dagelijkse challenge): telt als 0 punten,
-// net als een gok die te ver van de juiste plek af zit.
+// An unanswered solo round scores zero points.
 function forceSoloTimeout() {
   gg.submitted = true;
   gg.history.push({ km: null, pts: 0, country: gg.current.countryHint });
   showSoloResultOverlay(null, 0);
 }
 
-// Ronde niet op tijd afgemaakt (streak): telt als een fout antwoord, streak eindigt.
+// An unanswered streak round ends the streak.
 function forceStreakTimeout() {
   gg.streakLocked = true;
   showStreakGameOver("(geen antwoord)");
@@ -312,9 +150,12 @@ function teardown() {
 
 export function cleanupGeoGuesser() {
   teardown();
+  actionController?.destroy();
+  actionController = null;
+  window.removeEventListener("keydown", handleCheatKeydown, true);
 }
 
-// ---------- Reconnect: onthoud lobby-sessie zodat een page-reload 'm terugvindt ----------
+// Persist lobby identity so a page reload can reconnect.
 
 function saveLobbySession() {
   if (!gg?.room) return;
@@ -334,13 +175,7 @@ function getLobbySession() {
   } catch (e) { return null; }
 }
 
-// ---------- URL helpers ----------
-// Elk scherm van GeoGuesser is bereikbaar via een eigen, deelbaar pad:
-// /geoguesser, /geoguesser/singleplayer, /geoguesser/multiplayer, en
-// /geoguesser/multiplayer/<CODE> om direct een lobby te joinen/herverbinden.
-// We gebruiken replaceState (geen pushState) zodat elke klik door de menu's
-// niet de terug-knop van de browser vult met tientallen tussenstappen — de
-// URL volgt gewoon waar je bent, zonder een nieuwe geschiedenis-entry.
+// Reflect internal screens in replaceable, shareable URLs.
 function setUrlPath(path) {
   history.replaceState(null, "", path);
 }
@@ -349,13 +184,13 @@ function setLobbyInUrl(code) {
 }
 function clearLobbyFromUrl() { setUrlPath("/geoguesser"); }
 
-// ---------- Entry point ----------
-
-// `routeSegments` komt van main.js' router: het deel van het pad na
-// "/geoguesser", bijv. [] voor "/geoguesser", ["singleplayer"], of
-// ["multiplayer", "LFFW"].
+// Route segments describe the path after /geoguesser.
 export function renderGeoGuesser(rootEl, routeSegments = []) {
+  actionController?.destroy();
+  window.removeEventListener("keydown", handleCheatKeydown, true);
+  window.addEventListener("keydown", handleCheatKeydown, true);
   app = rootEl;
+  actionController = new ActionController(app, GEO_ACTIONS);
   teardown();
   gg = null;
 
@@ -371,15 +206,9 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
     return;
   }
 
-  // Fire-and-forget: get the Google Maps script loading/connecting the
-  // moment someone opens GeoGuesser, instead of only once a round starts.
-  // By the time a round actually needs it, the library is already warm.
+  // Warm the Maps connection before the first round starts.
   loadGoogleMaps().catch(() => {});
 
-  // Route: [] -> startscherm, ["singleplayer"] -> direct naar solo-
-  // instellingen, ["multiplayer"] -> multiplayer-menu, ["multiplayer", CODE]
-  // -> direct joinen/herverbinden met die lobby (vervangt de oude
-  // "?lobby="-query, die toch nooit werkte voor gedeelde hash-links).
   const [section, subCode] = routeSegments;
   const savedLobby = hasMultiplayerConfig() ? getLobbySession() : null;
 
@@ -413,24 +242,24 @@ function drawReconnectPrompt(saved) {
     <div class="card" style="cursor:default; text-align:center;">
       ${icon("wifi", { size: "xl" })}
       <h3>${pick("Reconnect to lobby", "Opnieuw verbinden met lobby")} ${saved.code}?</h3>
-      <p>${pick("You were connected as", "Je was verbonden als")} <strong>${saved.name}</strong>.</p>
+      <p>${pick("You were connected as", "Je was verbonden als")} <strong>${escapeHtml(saved.name)}</strong>.</p>
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="ggDismissReconnect()">${pick("No, back to menu", "Nee, terug naar menu")}</button>
-      <button class="btn primary" onclick="ggReconnectLobby()">${pick("Yes, reconnect", "Ja, opnieuw verbinden")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="dismiss-reconnect">${pick("No, back to menu", "Nee, terug naar menu")}</button>
+      <button class="btn primary" data-action="reconnect-lobby">${pick("Yes, reconnect", "Ja, opnieuw verbinden")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
-  window.__ggPendingReconnect = saved;
+  pendingReconnect = saved;
 }
 
-window.ggDismissReconnect = function () {
+const ggDismissReconnect = function () {
   clearLobbySession();
-  window.__ggPendingReconnect = null;
+  pendingReconnect = null;
   drawStartScreen();
 };
 
-window.ggReconnectLobby = async function () {
-  const saved = window.__ggPendingReconnect;
-  window.__ggPendingReconnect = null;
+const ggReconnectLobby = async function () {
+  const saved = pendingReconnect;
+  pendingReconnect = null;
   if (!saved) { drawStartScreen(); return; }
   await enterLobby(saved.code, saved.name, saved.isHost, null, saved.playerId);
 };
@@ -441,16 +270,16 @@ function drawAutoJoinScreen(code) {
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} ${pick("Join lobby", "Lobby joinen")}</h2><div class="desc">${pick("You were invited to lobby", "Je bent uitgenodigd voor lobby")} <strong>${code.toUpperCase()}</strong>.</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">${pick("Your name", "Jouw naam")}</h3>
-      <input id="ggAutoJoinName" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${getProfile().name || ''}"
+      <input id="ggAutoJoinName" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${escapeHtml(getProfile().name || "")}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
-      <button class="btn primary" onclick="ggAutoJoin('${code}')">${pick("Join", "Joinen")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-start">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" data-action="auto-join" data-code="${escapeHtml(code)}">${pick("Join", "Joinen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 }
 
-window.ggAutoJoin = async function (code) {
+const ggAutoJoin = async function (code) {
   const input = document.getElementById("ggAutoJoinName");
   const typed = (input?.value.trim()) || "";
   if (typed) {
@@ -470,19 +299,19 @@ function drawStartScreen() {
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">${pick("Where on Earth is this?", "Waar op aarde is dit?")}</div></div></div>
     <div class="game-mode-grid">
-    <button type="button" class="card game-mode-card" onclick="ggShowSoloSettings()">
+    <button type="button" class="card game-mode-card" data-action="show-solo-settings">
       ${icon("user", { size: "lg" })}<h3>${pick("Play solo", "Solo spelen")}</h3>
       <p>${pick("Choose rounds, locations and difficulty.", "Kies je rondes, locaties en moeilijkheidsgraad.")}</p>
     </button>
-    <button type="button" class="card game-mode-card" onclick="ggStartStreak()">
+    <button type="button" class="card game-mode-card" data-action="start-streak">
       ${icon("flame", { size: "lg" })}<h3>Streak</h3>
       <p>${pick("Guess countries in a row for as long as you can. Best streak:", "Raad landen op rij, zo lang je kan. Beste streak:")} <strong>${streakBest}</strong></p>
     </button>
-    <button type="button" class="card game-mode-card" onclick="ggStartDaily()">
+    <button type="button" class="card game-mode-card" data-action="start-daily">
       ${icon("calendar", { size: "lg" })}<h3>${pick("Daily challenge", "Dagelijkse challenge")}</h3>
       <p>${dailyResult ? pick(`Already played today: <strong>${dailyResult.totalScore} pts</strong> — view your result.`, `Vandaag al gespeeld: <strong>${dailyResult.totalScore} pts</strong> — bekijk je resultaat.`) : pick("5 fixed rounds, identical for everyone each day.", "5 vaste rondes, elke dag hetzelfde voor iedereen.")}</p>
     </button>
-    <button type="button" class="card game-mode-card" ${mpAvailable ? 'onclick="ggShowMultiplayerMenu()"' : "disabled"}>
+    <button type="button" class="card game-mode-card" ${mpAvailable ? 'data-action="show-multiplayer-menu"' : "disabled"}>
       ${icon("users", { size: "lg" })}<h3>${pick("Play with friends", "Met vrienden")} <span class="muted">(multiplayer)</span></h3>
       <p>${mpAvailable ? pick("Create a lobby or join one with a code.", "Maak een lobby of join er een met een code.") : pick("Multiplayer is not configured yet.", "Multiplayer is nog niet ingesteld.")}</p>
     </button></div>
@@ -490,9 +319,8 @@ function drawStartScreen() {
   initAdSlots();
 }
 
-// ---------- Solo settings ----------
 
-window.ggShowSoloSettings = function (prefill = {}) {
+const ggShowSoloSettings = function (prefill = {}) {
   setUrlPath("/geoguesser/singleplayer");
   const ar = prefill.rounds || 5;
   app.innerHTML = `
@@ -519,8 +347,8 @@ window.ggShowSoloSettings = function (prefill = {}) {
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
-      <button class="btn primary" onclick="ggStartSolo()">${pick("Play", "Spelen")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-start">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" data-action="start-solo">${pick("Play", "Spelen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   initAdSlots();
   document.getElementById("soloRoundPills").addEventListener("click", (e) => {
@@ -536,9 +364,9 @@ window.ggShowSoloSettings = function (prefill = {}) {
   wireLocationSetting("solo");
 };
 
-window.ggShowStart = function () { drawStartScreen(); };
+const ggShowStart = function () { drawStartScreen(); };
 
-window.ggStartSolo = function () {
+const ggStartSolo = function () {
   const roundBtn = document.querySelector("#soloRoundPills .gg-pill-btn.active");
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : 5;
   const locSet = readLocationSetting("solo");
@@ -552,7 +380,6 @@ window.ggStartSolo = function () {
   nextSoloRound();
 };
 
-// ---------- Solo mode ----------
 
 function drawFullscreenLoading(roundLabel) {
   const existing = document.getElementById("ggFullscreenWrap");
@@ -566,7 +393,7 @@ function drawFullscreenLoading(roundLabel) {
       <div style="color:#fff; font-size:14px; opacity:0.7;">${pick("Finding a Street View location…", "Street View-locatie zoeken…")}</div>
     </div>
     <div class="gg-hud-top">
-      <button class="gg-hud-back-btn" onclick="ggExitToStart()">${icon("close", { size: "sm" })}</button>
+      <button class="gg-hud-back-btn" data-action="exit-to-start">${icon("close", { size: "sm" })}</button>
       <span class="gg-hud-pill">${roundLabel}</span>
     </div>`;
   document.body.appendChild(wrap);
@@ -577,10 +404,7 @@ async function nextSoloRound() {
   await loadAndDrawSoloRound();
 }
 
-// Haal een nieuwe locatie op voor de HUIDIGE ronde (ronde-nummer blijft gelijk).
-// Gebruikt voor zowel "volgende ronde" (na ++) als de "andere locatie"-knop,
-// voor het geval iemand toch nog in een onspeelbare plek (bv. een gebouw
-// zonder uitgang) terechtkomt ondanks het filter op navigeerbare links.
+// Replace the current round location without changing its round number.
 async function loadAndDrawSoloRound() {
   gg.guess = null;
   gg.submitted = false;
@@ -605,7 +429,7 @@ async function loadAndDrawSoloRound() {
       <div class="card" style="cursor:default;">
         ${icon("wifi", { size: "xl" })}<h3>${pick("No Street View found", "Geen Street View gevonden")}</h3>
         <p>${pick("Please try again.", "Probeer het opnieuw.")}</p>
-        <button class="btn primary" onclick="ggStartSolo()" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
+        <button class="btn primary" data-action="start-solo" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
       </div>`;
     return;
   }
@@ -617,10 +441,8 @@ async function loadAndDrawSoloRound() {
   startRoundTimer(120);
 }
 
-// Zit je vast (bv. binnen in een gebouw zonder uitgang, of een technische
-// glitch waarbij lopen/draaien niet meer werkt)? Haal een nieuwe locatie op
-// voor dezelfde ronde, zonder dat dit als een gok telt.
-window.ggRerollRound = function () {
+// Reroll an unusable panorama without consuming the round.
+const ggRerollRound = function () {
   if (!gg) return;
   if ((gg.mode === "solo" || gg.mode === "daily") && !gg.submitted) {
     loadAndDrawSoloRound();
@@ -635,10 +457,7 @@ function submitSoloGuess() {
   gg.submitted = true;
   const km = haversineKm(gg.guess, [gg.current.lng, gg.current.lat]);
   const pts = scoreForDistance(km);
-  // Gokmodus: de punten van deze ronde worden pas bijgeschreven nadat je
-  // kiest om ze veilig te incasseren of te verdubbelen bij het rad — zie
-  // ggBankPoints()/ggOpenWager() hieronder. Bij 0 punten valt er niets te
-  // wagen, dus dan telt de ronde meteen mee zoals normaal.
+  // Gamble mode holds positive round points until the player banks or spins.
   if (gg.difficulty === "gamble" && pts > 0) {
     gg.pendingPts = pts;
     gg.pendingKm = km;
@@ -677,8 +496,8 @@ function showSoloResultOverlay(km, pts, opts = {}) {
     <div class="gg-wager-panel" id="ggWagerPanel">
       <p class="small">${icon("chip", { size: "sm" })} ${pick(`Gamble mode: bank your ${pts} pts or risk them at the wheel for a chance to win more.`, `Gokmodus: incasseer je ${pts} pts veilig, of waag ze bij het rad voor een kans op meer — of alles kwijt.`)}</p>
       <div class="gg-wager-actions">
-        <button class="btn" onclick="ggBankPoints()">${icon("check", { size: "sm" })} ${pick("Bank safely", "Veilig incasseren")} (+${pts})</button>
-        <button class="btn primary" onclick="ggOpenWager()">${icon("chip", { size: "sm" })} ${pick("Spin the wheel", "Waag ze bij het rad")}</button>
+        <button class="btn" data-action="bank-points">${icon("check", { size: "sm" })} ${pick("Bank safely", "Veilig incasseren")} (+${pts})</button>
+        <button class="btn primary" data-action="open-wager">${icon("chip", { size: "sm" })} ${pick("Spin the wheel", "Waag ze bij het rad")}</button>
       </div>
     </div>` : ""}
     ${adSlotHtml("geoguesserResults")}
@@ -735,7 +554,7 @@ function showSoloResultOverlay(km, pts, opts = {}) {
 function showSoloFinalScore() {
   const avg = Math.round(gg.totalScore / gg.rounds);
   const savedLoc = gg.locationSet, savedRounds = gg.rounds;
-  window.__ggSoloReplayPrefill = { rounds: savedRounds, locationSet: savedLoc };
+  soloReplayPrefill = { rounds: savedRounds, locationSet: savedLoc };
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">${pick("Final result", "Eindresultaat")}</div></div></div>
@@ -759,21 +578,20 @@ function showSoloFinalScore() {
     </div>` : ""}
     ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Menu</button>
-      <button class="btn primary" onclick="ggReplaySoloSettings()">${icon("refresh", { size: "sm" })} ${pick("Play again", "Opnieuw spelen")}</button>
+      <button class="btn" data-action="show-start">${icon("chevronLeft", { size: "sm" })} Menu</button>
+      <button class="btn primary" data-action="replay-solo-settings">${icon("refresh", { size: "sm" })} ${pick("Play again", "Opnieuw spelen")}</button>
     </div>`;
   initAdSlots();
 }
 
-window.ggReplaySoloSettings = function () {
-  ggShowSoloSettings(window.__ggSoloReplayPrefill || {});
+const ggReplaySoloSettings = function () {
+  ggShowSoloSettings(soloReplayPrefill || {});
 };
 
-window.ggExitToStart = function () { teardown(); drawStartScreen(); };
+const ggExitToStart = function () { teardown(); drawStartScreen(); };
 
-// ---------- Streak mode ----------
 
-window.ggStartStreak = function () {
+const ggStartStreak = function () {
   gg = { mode: "streak", streak: 0, best: getStreakBest(), difficulty: "free", blackwhite: false,
     streakLocked: false,
     pointFn: buildPointFn("world"), usedPanos: new Set(), current: null, panorama: null };
@@ -800,7 +618,7 @@ async function nextStreakRound() {
       <div class="card" style="cursor:default;">
         ${icon("wifi", { size: "xl" })}<h3>${pick("No Street View found", "Geen Street View gevonden")}</h3>
         <p>${pick("Please try again.", "Probeer het opnieuw.")}</p>
-        <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
+        <button class="btn primary" data-action="start-streak" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
       </div>`;
     return;
   }
@@ -823,10 +641,10 @@ function drawStreakRoundScreen() {
       <div class="gg-pano-loading-text">${pick("Loading panorama…", "Panorama laden…")}</div>
     </div>
     <div class="gg-hud-top" id="ggHudTop">
-      <button class="gg-hud-back-btn" onclick="ggExitToStart()">${icon("close", { size: "sm" })}</button>
+      <button class="gg-hud-back-btn" data-action="exit-to-start">${icon("close", { size: "sm" })}</button>
       <span class="gg-hud-pill">${icon("flame", { size: "sm" })} Streak: ${gg.streak}</span>
       <span class="gg-hud-pill">${pick("Best", "Beste")}: ${gg.best}</span>
-      <button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="${pick("Stuck? Get another location.", "Zit je vast? Krijg een andere locatie.")}">${icon("refresh", { size: "sm" })} ${pick("Another location", "Andere locatie")}</button>
+      <button class="gg-hud-pill gg-hud-reroll" data-action="reroll-round" title="${pick("Stuck? Get another location.", "Zit je vast? Krijg een andere locatie.")}">${icon("refresh", { size: "sm" })} ${pick("Another location", "Andere locatie")}</button>
     </div>
     <div class="gg-streak-panel" id="ggStreakPanel">
       <div class="gg-map-corner-header"><span class="gg-map-guess-info">${pick("Which country is this?", "Welk land is dit?")}</span></div>
@@ -876,16 +694,15 @@ function showStreakGameOver(guess) {
       <h3>Streak: ${gg.streak}</h3>
       <p>${pick("The correct answer was", "Het juiste antwoord was")} <strong>${countryName(gg.current.countryHint)}</strong>, ${pick("you guessed", "jij gokte")} <strong>${countryName(guess)}</strong>.</p>
       <p class="small">${isNewBest ? `${icon("trophy", { size: "sm" })} ${pick("New best streak!", "Nieuwe beste streak!")}` : `${pick("Best streak", "Beste streak")}: ${gg.best}`}</p>
-      <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
+        <button class="btn primary" data-action="start-streak" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
     </div>
     ${adSlotHtml("geoguesserResults")}
-    <div class="footerrow"><button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Menu</button><div></div></div>`;
+    <div class="footerrow"><button class="btn" data-action="show-start">${icon("chevronLeft", { size: "sm" })} Menu</button><div></div></div>`;
   initAdSlots();
 }
 
-// ---------- Daily challenge ----------
 
-window.ggStartDaily = function () {
+const ggStartDaily = function () {
   const existing = getDailyResult();
   if (existing) { showDailyResult(existing); return; }
   const rng = mulberry32(hashStringToSeed(getDailyKey()));
@@ -920,7 +737,7 @@ function showDailyResult(result) {
       </div>`).join("")}
     </div>
     ${adSlotHtml("geoguesserResults")}
-    <div class="footerrow"><button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Menu</button><div></div></div>`;
+    <div class="footerrow"><button class="btn" data-action="show-start">${icon("chevronLeft", { size: "sm" })} Menu</button><div></div></div>`;
   initAdSlots();
   const copyBtn = document.getElementById("ggDailyCopyBtn");
   if (copyBtn) {
@@ -932,35 +749,32 @@ function showDailyResult(result) {
   }
 }
 
-// ---------- Multiplayer: menu ----------
-
-// Kiezen tussen zelf hosten of joinen met een code (net als OpenGuessr).
-window.ggShowMultiplayerMenu = function () {
+const ggShowMultiplayerMenu = function () {
   setUrlPath("/geoguesser/multiplayer");
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} GeoGuesser multiplayer</h2><div class="desc">${pick("Play the same rounds with friends in real time.", "Speel dezelfde rondes tegelijk met vrienden.")}</div></div></div>
-    <div class="game-mode-grid"><button type="button" class="card game-mode-card" onclick="ggShowMpHostSettings()">
+    <div class="game-mode-grid"><button type="button" class="card game-mode-card" data-action="show-host-settings">
       ${icon("plus", { size: "lg" })}<h3>${pick("Host a lobby", "Lobby hosten")}</h3>
       <p>${pick("Choose the mode and settings, create a room and share the code.", "Stel de spelmodus en instellingen in, maak een kamer aan en deel de code.")}</p>
     </button>
-    <button type="button" class="card game-mode-card" onclick="ggShowMpJoin()">
+    <button type="button" class="card game-mode-card" data-action="show-mp-join">
       ${icon("key", { size: "lg" })}<h3>${pick("Join a lobby", "Lobby joinen")}</h3>
       <p>${pick("Enter the code you received from a friend.", "Vul hier de code in die je van een vriend kreeg.")}</p>
     </button></div>
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
+      <button class="btn" data-action="show-start">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
     </div>`;
 };
 
-window.ggShowMpHostSettings = function (prefill = {}) {
+const ggShowMpHostSettings = function (prefill = {}) {
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} ${pick("Host a lobby", "Lobby hosten")}</h2><div class="desc">${pick("Configure your lobby and create it.", "Stel je lobby in en maak 'm aan.")}</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">${pick("Your name", "Jouw naam")}</h3>
-      <input id="ggNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${prefill.name || getProfile().name || ''}"
+      <input id="ggNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${escapeHtml(prefill.name || getProfile().name || "")}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; margin-top:12px;">
@@ -981,8 +795,8 @@ window.ggShowMpHostSettings = function (prefill = {}) {
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
-      <button class="btn primary" onclick="ggHostLobby()">${pick("Create room", "Kamer aanmaken")} ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" data-action="show-multiplayer-menu">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" data-action="host-lobby">${pick("Create room", "Kamer aanmaken")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   initAdSlots();
   document.getElementById("mpRoundPills").addEventListener("click", (e) => {
@@ -995,15 +809,15 @@ window.ggShowMpHostSettings = function (prefill = {}) {
   wireTimerSetting("mp");
 };
 
-// Code-invoer met losse vakjes per teken, zoals OpenGuessr dat doet.
-window.ggShowMpJoin = function (prefill = {}) {
+// Split the room code into keyboard-friendly character boxes.
+const ggShowMpJoin = function (prefill = {}) {
   const codeLen = 4;
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} ${pick("Join a lobby", "Lobby joinen")}</h2><div class="desc">${pick("Enter the code you received.", "Vul de code in die je hebt gekregen.")}</div></div></div>
     <div class="card" style="cursor:default;">
       <h3 style="margin-bottom:10px;">${pick("Your name", "Jouw naam")}</h3>
-      <input id="ggNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${prefill.name || getProfile().name || ''}"
+      <input id="ggNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${escapeHtml(prefill.name || getProfile().name || "")}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; text-align:center; margin-top:12px;">
@@ -1015,7 +829,7 @@ window.ggShowMpJoin = function (prefill = {}) {
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
+      <button class="btn" data-action="show-multiplayer-menu">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
     </div>`;
   initAdSlots();
 
@@ -1043,7 +857,7 @@ window.ggShowMpJoin = function (prefill = {}) {
 function ggSubmitMpJoin() {
   const code = Array.from(document.querySelectorAll(".gg-code-box")).map((b) => b.value).join("");
   if (code.length < 4) { alert(pick("Enter a valid 4-character lobby code.", "Vul een geldige lobby-code van 4 tekens in.")); return; }
-  window.ggJoinLobby(code);
+  ggJoinLobby(code);
 }
 
 function getPlayerName() {
@@ -1069,7 +883,6 @@ function getMpSettings() {
   };
 }
 
-// ---------- Spelmodi (FFA / Duels / Team Duels / Battle Royale) ----------
 
 const GAME_MODES = {
   ffa: { label: "FFA (iedereen tegelijk)", minPlayers: 2 },
@@ -1084,7 +897,7 @@ function gameModeOptionsHtml(selected) {
     .join("");
 }
 
-// Whether the host can currently press "Start spel", plus a reason when not.
+// Validate player requirements before the host starts a mode.
 function checkCanStartGame() {
   const mode = GAME_MODES[gg.gameMode] || GAME_MODES.ffa;
   const players = gg.room.players();
@@ -1109,16 +922,14 @@ function onMpTeamsReceived(payload) {
   if (gg.screen === "lobby") drawLobbyWaiting();
 }
 
-// Host-only: toggle one player between team A/B and broadcast the change.
-window.ggSetPlayerTeam = function (playerId, team) {
+const ggSetPlayerTeam = function (playerId, team) {
   if (!gg.isHost) return;
   gg.teams = { ...gg.teams, [playerId]: team };
   gg.room.send("teams", { teams: gg.teams });
   drawLobbyWaiting();
 };
 
-// Host-only: split everyone currently in the lobby evenly at random.
-window.ggRandomizeTeams = function () {
+const ggRandomizeTeams = function () {
   if (!gg.isHost) return;
   const shuffled = [...gg.room.players()].sort(() => Math.random() - 0.5);
   const teams = {};
@@ -1128,10 +939,10 @@ window.ggRandomizeTeams = function () {
   drawLobbyWaiting();
 };
 
-window.ggHostLobby = async function () {
+const ggHostLobby = async function () {
   await enterLobby(randomRoomCode(), getPlayerName(), true, getMpSettings());
 };
-window.ggJoinLobby = async function (codeArg) {
+const ggJoinLobby = async function (codeArg) {
   const code = (codeArg || document.getElementById("ggCodeInput")?.value.trim() || "").toUpperCase();
   if (code.length < 4) { alert("Vul een geldige lobby-code van 4 tekens in."); return; }
   await enterLobby(code, getPlayerName(), false, null);
@@ -1164,7 +975,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
       <div class="card" style="cursor:default;">
         ${icon("warning", { size: "xl" })}<h3>Kon niet verbinden</h3>
         <p>${e.message}</p>
-        <button class="btn primary" onclick="ggShowMultiplayerMenu()" style="margin-top:10px;">Terug</button>
+        <button class="btn primary" data-action="show-multiplayer-menu" style="margin-top:10px;">Terug</button>
       </div>`;
     return;
   }
@@ -1187,15 +998,13 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
       showConnBanner(`${icon("warning", { size: "sm" })} Verbinding verbroken — opnieuw verbinden...`);
     } else if (status === "reconnected") {
       hideConnBanner();
-      // Vraag de host om de huidige rondestatus opnieuw te sturen, zodat we
-      // niets gemist hebben tijdens de onderbreking (hergebruikt de
-      // bestaande "late-joiner catch-up"-aanpak).
+      // Ask the host for state that may have changed while disconnected.
       if (!gg.isHost) gg.room.send("resync", {});
     }
   });
 
   room.onPresence((players) => {
-    // Auto-assign new players to the smaller team in Team Duels lobbies.
+    // Assign new players to the smaller team.
     if (gg?.isHost && gg.gameMode === "teamduels" && gg.screen === "lobby") {
       let changed = false;
       players.forEach((p) => {
@@ -1209,7 +1018,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
       if (changed) gg.room.send("teams", { teams: gg.teams });
     }
     if (gg?.screen === "lobby") drawLobbyWaiting();
-    // Late-joiner catch-up
+    // Catch late joiners up to the current round.
     if (gg?.isHost && gg.screen === "round" && gg.current) {
       const knownIds = new Set((gg.roundStartPlayers || []).map(p => p.playerId));
       const newPlayers = players.filter(p => !knownIds.has(p.playerId));
@@ -1218,10 +1027,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
           gg.roundStartPlayers.push(p);
           if (!gg.scoreboard[p.playerId]) gg.scoreboard[p.playerId] = { name: p.name, total: 0 };
         });
-        // Alleen de pano-id gaat mee, niet de ruwe lat/lng: anders zou iedereen
-        // in de lobby het antwoord al in het Network-tabblad (WS-berichten) kunnen
-        // lezen voordat er gegokt is. Elke client zoekt de panorama zelf op via
-        // de pano-id (zie createPanorama in streetview.js).
+        // Send only the panorama ID so coordinates do not reveal the answer.
         gg.room.send("round", { round: gg.round, total: gg.rounds, pano: gg.current.pano, countryHint: gg.current.countryHint });
       }
     }
@@ -1233,13 +1039,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   ensureChatWidget();
   drawLobbyWaiting();
 
-  // Een pagina-herlaad (via ggReconnectLobby) maakt hier een gloednieuwe
-  // GameRoom/verbinding aan — dat is niet dezelfde "reconnected"-tak
-  // hierboven in onConnectionChange (die vuurt alleen bij een kortstondig
-  // verbroken/hersteld WebSocket binnen dezelfde pagina, niet bij een echte
-  // refresh). Zonder dit bleef een herverbonden speler altijd op het
-  // lobby-scherm hangen, ook als het spel al bezig was: vraag de host hier
-  // ook expliciet om de huidige rondestatus.
+  // A full reload needs an explicit state sync after creating its new room.
   if (!isHost && existingPlayerId) {
     gg.room.send("resync", {});
   }
@@ -1273,12 +1073,12 @@ function drawLobbyWaiting() {
             <div class="gg-team-col-title">Team ${team}</div>
             ${players.filter(p => gg.teams?.[p.playerId] === team).map(p => `
               <div class="gg-team-chip">
-                ${p.name}${p.playerId === gg.playerId ? " (jij)" : ""}
-                ${gg.isHost ? `<button class="gg-team-swap" onclick="ggSetPlayerTeam('${p.playerId}','${team === "A" ? "B" : "A"}')" title="Naar team ${team === "A" ? "B" : "A"}">${icon("swap", { size: "sm" })}</button>` : ""}
+                ${escapeHtml(p.name)}${p.playerId === gg.playerId ? " (jij)" : ""}
+                ${gg.isHost ? `<button class="gg-team-swap" data-player-id="${escapeHtml(p.playerId)}" data-team="${team === "A" ? "B" : "A"}" title="Naar team ${team === "A" ? "B" : "A"}">${icon("swap", { size: "sm" })}</button>` : ""}
               </div>`).join("") || `<div class="small" style="opacity:0.6;">Nog niemand</div>`}
           </div>`).join("")}
       </div>
-      ${gg.isHost ? `<button class="btn" style="margin-top:10px; width:100%;" onclick="ggRandomizeTeams()">${icon("dice", { size: "sm" })} Willekeurig verdelen</button>` : ""}
+      ${gg.isHost ? `<button class="btn" style="margin-top:10px; width:100%;" data-action="randomize-teams">${icon("dice", { size: "sm" })} Willekeurig verdelen</button>` : ""}
     </div>`;
 
   app.innerHTML = `
@@ -1289,28 +1089,31 @@ function drawLobbyWaiting() {
       <h3 style="font-size:32px; letter-spacing:6px; margin:6px 0;">${gg.room.code}</h3>
       <div class="gg-share-row">
         <input class="gg-share-input" id="ggShareUrl" value="${shareUrl}" readonly />
-        <button class="btn" onclick="ggCopyLink()">${icon("clipboard", { size: "sm" })} Kopieer</button>
+        <button class="btn" data-action="copy-link">${icon("clipboard", { size: "sm" })} Kopieer</button>
       </div>
       <div class="small" style="margin-top:8px;">${icon("gear", { size: "sm" })} ${modeLabel} · ${gg.rounds} rondes · ${setLabel}${gg.roundTime ? ` · ${gg.roundTime}s per ronde` : ""} · Powerups: ${gg.powerups !== false ? "Aan" : "Uit"}</div>
     </div>
     ${teamsHtml}
     <div class="guesslist" style="margin-top:14px;">
       ${players.map(p => `<div class="gitem">
-        <div class="name">${p.name}${p.playerId === gg.playerId ? " (jij)" : ""}</div>
+        <div class="name">${escapeHtml(p.name)}${p.playerId === gg.playerId ? " (jij)" : ""}</div>
         <div></div><div></div><div></div>
       </div>`).join("")}
     </div>
     ${gg.isHost && !canStart.ok ? `<div class="small" style="color:var(--danger); margin-top:8px; text-align:center;">${canStart.reason}</div>` : ""}
     ${adSlotHtml("geoguesserLobby")}
     <div class="footerrow">
-      <button class="btn" onclick="ggLeaveLobby()">${icon("chevronLeft", { size: "sm" })} Lobby verlaten</button>
-      ${gg.isHost ? `<button class="btn" onclick="ggBackToHostSettings()">${icon("gear", { size: "sm" })} Instellingen</button>` : ""}
-      ${gg.isHost ? `<button class="btn primary" ${canStart.ok ? "" : "disabled"} onclick="ggMpStartGame()">Start spel ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
+      <button class="btn" data-action="leave-lobby">${icon("chevronLeft", { size: "sm" })} Lobby verlaten</button>
+      ${gg.isHost ? `<button class="btn" data-action="back-to-host-settings">${icon("gear", { size: "sm" })} Instellingen</button>` : ""}
+      ${gg.isHost ? `<button class="btn primary" ${canStart.ok ? "" : "disabled"} data-action="start-mp-game">Start spel ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
     </div>`;
   initAdSlots();
+  app.querySelectorAll(".gg-team-swap").forEach((button) => {
+    button.addEventListener("click", () => ggSetPlayerTeam(button.dataset.playerId, button.dataset.team));
+  });
 }
 
-window.ggCopyLink = function () {
+const ggCopyLink = function () {
   const input = document.getElementById("ggShareUrl");
   if (!input) return;
   navigator.clipboard.writeText(input.value).catch(() => { input.select(); document.execCommand("copy"); });
@@ -1318,9 +1121,9 @@ window.ggCopyLink = function () {
   if (btn) { btn.innerHTML = `${icon("check", { size: "sm" })} Gekopieerd!`; setTimeout(() => btn.innerHTML = `${icon("clipboard", { size: "sm" })} Kopieer`, 2000); }
 };
 
-window.ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); clearLobbySession(); drawStartScreen(); };
+const ggLeaveLobby = function () { teardown(); clearLobbyFromUrl(); clearLobbySession(); drawStartScreen(); };
 
-window.ggBackToHostSettings = function () {
+const ggBackToHostSettings = function () {
   if (!gg?.isHost) return;
   const prefill = { name: gg.name, rounds: gg.rounds, locationSet: gg.locationSet, gameMode: gg.gameMode, roundTime: gg.roundTime, powerups: gg.powerups };
   teardown();
@@ -1329,7 +1132,6 @@ window.ggBackToHostSettings = function () {
   ggShowMpHostSettings(prefill);
 };
 
-// ---------- Chat (blijft bestaan over alle scherm-wissels in de lobby heen) ----------
 
 function ensureChatWidget() {
   if (!gg?.room || document.getElementById("ggChatWidget")) return;
@@ -1424,7 +1226,6 @@ function onMpChatReceived(payload) {
   appendChatMessage(payload.name, payload.text, false);
 }
 
-// ---------- Reconnect: verbindingsbanner + host stuurt huidige stand opnieuw ----------
 
 function showConnBanner(text) {
   let banner = document.getElementById("ggConnBanner");
@@ -1441,24 +1242,14 @@ function hideConnBanner() {
   document.getElementById("ggConnBanner")?.remove();
 }
 
-// Host-only: een herverbonden speler kan gemist hebben wat er gebeurde —
-// stuur de huidige rondestatus (of resultaten/eindstand) opnieuw, net als
-// bij een laatkomer die de lobby binnenkomt.
+// Resend the authoritative host state after a reconnect.
 function onMpResyncRequest() {
   if (!gg?.isHost) return;
-  // Instellingen altijd meesturen, ongeacht het huidige scherm: een
-  // herverbonden speler krijgt na een refresh een gloednieuwe gg-state met
-  // de standaardinstellingen (difficulty "free", enz.) — zonder dit blijft
-  // bijvoorbeeld gokmodus ("gamble") na een refresh op "free" staan, waardoor
-  // het gok-paneel bij de resultaten nooit meer terugkomt, ook al klopt de
-  // rest van de rondestatus weer.
+  // Always restore settings before resending round or result state.
   gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite });
   gg.room.send("teams", { teams: gg.teams });
   if (gg.screen === "round" && gg.current) {
-    // Alleen de pano-id gaat mee, niet de ruwe lat/lng: anders zou iedereen
-        // in de lobby het antwoord al in het Network-tabblad (WS-berichten) kunnen
-        // lezen voordat er gegokt is. Elke client zoekt de panorama zelf op via
-        // de pano-id (zie createPanorama in streetview.js).
+    // Send only the panorama ID so coordinates do not reveal the answer.
         gg.room.send("round", { round: gg.round, total: gg.rounds, pano: gg.current.pano, countryHint: gg.current.countryHint });
   } else if (gg.screen === "results" && gg.lastResultsPayload) {
     gg.room.send("results", gg.lastResultsPayload);
@@ -1467,7 +1258,7 @@ function onMpResyncRequest() {
   }
 }
 
-window.ggMpStartGame = function () {
+const ggMpStartGame = function () {
   if (!gg.isHost) return;
   const canStart = checkCanStartGame();
   if (!canStart.ok) { alert(canStart.reason); return; }
@@ -1493,7 +1284,6 @@ window.ggMpStartGame = function () {
   hostAdvanceRound();
 };
 
-// ---------- Multiplayer game loop ----------
 
 async function hostAdvanceRound() {
   gg.round++;
@@ -1520,22 +1310,19 @@ async function hostAdvanceRound() {
   gg.currentGuesses = {}; gg.finishingRound = false;
   gg.roundStartPlayers = gg.room.players();
   gg.hostAnswer = round;
-  // Zie hierboven: bewust geen lat/lng mee, alleen de pano-id.
+  // Keep answer coordinates out of round broadcasts.
   gg.room.send("round", { round: gg.round, total: gg.rounds, pano: round.pano, countryHint: round.countryHint });
 }
 
 function onMpRoundStart(payload) {
-  // Idempotency: existing players ignore re-broadcasts (for late-joiner catch-up)
+  // Ignore catch-up broadcasts for an already active round.
   if (gg.screen === "round" && gg.round === payload.round) return;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
 
-  // Powerups & Sabotages
   if (payload.round === 1) {
     if (gg.powerups !== false) {
-      const powerups = ["hint", "shield", "5050"];
-      const sabotages = ["fakehint", "ink", "nocompass"];
-      gg.myPowerup = powerups[Math.floor(Math.random() * powerups.length)];
-      gg.mySabotage = sabotages[Math.floor(Math.random() * sabotages.length)];
+      gg.myPowerup = randomPowerup();
+      gg.mySabotage = randomSabotage();
     } else {
       gg.myPowerup = null;
       gg.mySabotage = null;
@@ -1549,9 +1336,7 @@ function onMpRoundStart(payload) {
     gg.panorama.setOptions({ panControl: !gg.difficulty.includes("nmpz") });
   }
 
-  // Nog niet incasseren/gokken gekozen voor de vorige ronde? Dan schrijf je
-  // 'm automatisch veilig bij zodat je niets kwijtraakt door de nieuwe
-  // ronde te missen. Sluit ook een eventueel nog open rad-scherm.
+  // Automatically bank unresolved points before a new round starts.
   document.getElementById("ggWagerOverlay")?.remove();
   if (gg.pendingMpWager) {
     const pts = gg.pendingMpWager.pts;
@@ -1616,11 +1401,7 @@ function hostFinishRound() {
     let pts = scoreForDistance(km);
     if (g.shield && gg.gameMode !== "duels") pts = Math.min(5000, pts + 1000);
     if (!gg.scoreboard[playerId]) gg.scoreboard[playerId] = { name: g.name, total: 0 };
-    // Gokmodus: de ronde-punten gaan pas op het scorebord als de speler zelf
-    // kiest om ze veilig te incasseren of te verdubbelen bij het rad (zie
-    // ggMpBankPoints()/ggMpOpenWager() + onMpWagerReceived hieronder) — net
-    // als in solo. Andere spelmodi (duels/team duels/BR) blijven altijd op
-    // de ruwe ronde-punten rekenen, ongeacht of iemand nog aan het gokken is.
+    // Gamble mode defers points; competitive modes always use raw round scores.
     if (!(gg.difficulty === "gamble" && pts > 0)) {
       gg.scoreboard[playerId].total += pts;
     }
@@ -1628,7 +1409,7 @@ function hostFinishRound() {
     return { playerId, name: g.name, lat: g.lat, lng: g.lng, km, pts };
   });
 
-  // Duels: distance-based damage to the opponent (real-GeoGuessr style HP).
+  // Duels convert the score gap into damage.
   let damage = {};
   if (gg.gameMode === "duels" && guesses.length === 2) {
     const [a, b] = guesses;
@@ -1641,7 +1422,7 @@ function hostFinishRound() {
     if (gg.hp[a.playerId] <= 0 || gg.hp[b.playerId] <= 0) gg.duelOver = true;
   }
 
-  // Team Duels: distance-based damage to the opponent team.
+  // Team duels convert the team score gap into damage.
   let teamDamage = {};
   if (gg.gameMode === "teamduels") {
     let aBest = { pts: 0, shield: false };
@@ -1663,7 +1444,7 @@ function hostFinishRound() {
     if (gg.teamHp.A <= 0 || gg.teamHp.B <= 0) gg.duelOver = true;
   }
 
-  // Battle Royale: whoever guessed worst this round is out (unless everyone tied).
+  // Battle Royale eliminates the lowest scorer unless everyone ties.
   let eliminatedThisRound = [];
   if (gg.gameMode === "br") {
     const aliveGuesses = guesses.filter((g) => gg.alive.has(g.playerId));
@@ -1701,8 +1482,7 @@ function onMpResults(payload) {
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   document.getElementById("ggFullscreenWrap")?.remove();
 
-  // Gokmodus: eigen ronde-punten (nog niet op het scorebord) staan klaar om
-  // veilig in te casseren of te wagen — zie ggMpBankPoints()/ggMpOpenWager().
+  // Keep local gamble points pending until the player decides.
   if (gg.difficulty === "gamble") {
     const own = payload.guesses.find((g) => g.playerId === gg.playerId);
     gg.pendingMpWager = own && own.pts > 0 ? { round: payload.round, pts: own.pts } : null;
@@ -1729,7 +1509,7 @@ function drawMpResultsScreen(payload) {
           const pct = Math.max(0, Math.min(100, Math.round(hp / 5000 * 100)));
           const dmg = payload.damage?.[pid] || 0;
           return `<div style="margin-bottom:8px;">
-            <div class="small" style="display:flex; justify-content:space-between;"><span>${name}</span><span>${hp} hp${dmg ? ` · +${dmg} schade` : ""}</span></div>
+            <div class="small" style="display:flex; justify-content:space-between;"><span>${escapeHtml(name)}</span><span>${hp} hp${dmg ? ` · +${dmg} schade` : ""}</span></div>
             <div class="gg-hp-track"><div class="gg-hp-fill" style="width:${pct}%;"></div></div>
           </div>`;
         }).join("")}
@@ -1752,7 +1532,7 @@ function drawMpResultsScreen(payload) {
     if (gg.gameMode === "br" && payload.eliminatedThisRound?.length) {
       return `<div class="card" style="cursor:default; margin-top:10px; text-align:center;">
         ${icon("close", { size: "xl" })}<h3>Uitgeschakeld</h3>
-        <p>${payload.eliminatedThisRound.join(", ")}</p>
+        <p>${payload.eliminatedThisRound.map(escapeHtml).join(", ")}</p>
         <p class="small">Nog over: ${payload.alive.length}</p>
       </div>`;
     }
@@ -1774,15 +1554,15 @@ function drawMpResultsScreen(payload) {
     <div class="gg-wager-panel" id="ggMpWagerPanel" style="margin-top:10px;">
       <p class="small">${icon("chip", { size: "sm" })} Gokmodus: incasseer je ${gg.pendingMpWager.pts} pts veilig, of waag ze bij het rad voor een kans op meer — of alles kwijt. Alleen jouw punten, niet die van anderen.</p>
       <div class="gg-wager-actions">
-        <button class="btn" onclick="ggMpBankPoints()">${icon("check", { size: "sm" })} Veilig incasseren (+${gg.pendingMpWager.pts})</button>
-        <button class="btn primary" onclick="ggMpOpenWager()">${icon("chip", { size: "sm" })} Waag ze bij het rad</button>
+        <button class="btn" data-action="mp-bank-points">${icon("check", { size: "sm" })} Veilig incasseren (+${gg.pendingMpWager.pts})</button>
+        <button class="btn primary" data-action="mp-open-wager">${icon("chip", { size: "sm" })} Waag ze bij het rad</button>
       </div>
     </div>` : ""}
     <div class="guesslist" style="margin-top:10px;">
       ${sorted.map((g, i) => {
         const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
         return `<div class="gitem">
-          <div class="name"><span class="gg-player-dot" style="background:${color};"></span>${g.name}</div>
+          <div class="name"><span class="gg-player-dot" style="background:${color};"></span>${escapeHtml(g.name)}</div>
           <div class="dist">${Math.round(g.km).toLocaleString()} km</div>
           <div></div><div class="prox">${g.pts} pts</div>
         </div>`;
@@ -1792,7 +1572,7 @@ function drawMpResultsScreen(payload) {
     <div class="guesslist" id="ggMpTotalScoreList">
       ${Object.values(gg.scoreboard).sort((a,b) => b.total - a.total)
         .map(s => `<div class="gitem">
-          <div class="name">${s.name}</div>
+          <div class="name">${escapeHtml(s.name)}</div>
           <div></div><div></div><div class="prox">${s.total} pts</div>
         </div>`).join("")}
     </div>
@@ -1800,12 +1580,11 @@ function drawMpResultsScreen(payload) {
     <div class="footerrow">
       <div></div>
       ${gg.isHost
-        ? `<button class="btn primary" onclick="ggMpNextFromHost()">${isLast ? "Bekijk eindscore" : `Volgende ronde ${icon("chevronRight", { size: "sm" })}`}</button>`
+        ? `<button class="btn primary" data-action="mp-next">${isLast ? "Bekijk eindscore" : `Volgende ronde ${icon("chevronRight", { size: "sm" })}`}</button>`
         : `<div class="small">Wachten op host...</div>`}
     </div>`;
   initAdSlots();
 
-  // Draw Google Maps result map
   setTimeout(() => {
     const mapEl = document.getElementById("ggMpResultMap");
     if (!mapEl || !window.google?.maps) return;
@@ -1822,7 +1601,6 @@ function drawMpResultsScreen(payload) {
     const bounds = new mapsApi.LatLngBounds();
     bounds.extend(answerPos);
 
-    // Answer marker (green)
     new mapsApi.Marker({ position: answerPos, map: rmap,
       icon: { path: mapsApi.SymbolPath.CIRCLE, scale: 11, fillColor: "#2ecc71", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2.5 },
       title: payload.answer.countryHint, zIndex: 100 });
@@ -1837,7 +1615,7 @@ function drawMpResultsScreen(payload) {
         title: `${g.name}: ${Math.round(g.km).toLocaleString()} km · ${g.pts} pts` });
 
       const infoWindow = new mapsApi.InfoWindow({
-        content: `<div style="font-size:13px; font-weight:600; padding:2px 4px;">${g.name}<br><span style="color:#555;">${Math.round(g.km).toLocaleString()} km · ${g.pts} pts</span></div>`
+        content: `<div style="font-size:13px; font-weight:600; padding:2px 4px;">${escapeHtml(g.name)}<br><span style="color:#555;">${Math.round(g.km).toLocaleString()} km · ${g.pts} pts</span></div>`
       });
       marker.addListener("click", () => infoWindow.open(rmap, marker));
 
@@ -1850,13 +1628,12 @@ function drawMpResultsScreen(payload) {
   }, 100);
 }
 
-window.ggMpNextFromHost = function () {
+const ggMpNextFromHost = function () {
   if (!gg.isHost) return;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   hostAdvanceRound();
 };
 
-// ---------- Post-game: restart in same lobby ----------
 
 function onMpGameOver(payload) {
   gg.screen = "gameover";
@@ -1864,11 +1641,7 @@ function onMpGameOver(payload) {
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   document.getElementById("ggWagerOverlay")?.remove();
 
-  // Spel afgelopen terwijl je nog niet had gekozen om je laatste ronde-punten
-  // te incasseren of te wagen? Schrijf ze veilig bij, zodat ze niet
-  // verdwijnen. payload.scoreboard is de laatste stand van de host, die dit
-  // (nog niet verstuurde) bedrag nog niet kent — dus lokaal erbij optellen
-  // en alsnog naar de host sturen zodat iedereen dezelfde stand ziet.
+  // Bank unresolved final-round points before accepting the final scoreboard.
   gg.scoreboard = payload.scoreboard;
   if (gg.pendingMpWager) {
     const pts = gg.pendingMpWager.pts;
@@ -1883,15 +1656,15 @@ function onMpGameOver(payload) {
   if (payload.eliminated) gg.eliminated = payload.eliminated;
   const sorted = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total);
 
-  let winnerText = sorted[0] ? sorted[0].name + " wint!" : "Klaar!";
+  let winnerText = sorted[0] ? `${escapeHtml(sorted[0].name)} wint!` : "Klaar!";
   let extraWinnerHtml = "";
   if (gg.gameMode === "duels" && payload.hp) {
     const entries = Object.entries(payload.hp);
     const nameFor = (pid) => gg.scoreboard[pid]?.name || "Speler";
     if (entries.length === 2) {
       const [[pidA, hpA], [pidB, hpB]] = entries;
-      winnerText = `${hpA >= hpB ? nameFor(pidA) : nameFor(pidB)} wint het duel!`;
-      extraWinnerHtml = `<p class="small">${nameFor(pidA)}: ${hpA} hp · ${nameFor(pidB)}: ${hpB} hp</p>`;
+      winnerText = `${escapeHtml(hpA >= hpB ? nameFor(pidA) : nameFor(pidB))} wint het duel!`;
+      extraWinnerHtml = `<p class="small">${escapeHtml(nameFor(pidA))}: ${hpA} hp · ${escapeHtml(nameFor(pidB))}: ${hpB} hp</p>`;
     }
   } else if (gg.gameMode === "teamduels" && payload.teamHp) {
     const winTeam = (payload.teamHp.A || 0) >= (payload.teamHp.B || 0) ? "A" : "B";
@@ -1899,7 +1672,7 @@ function onMpGameOver(payload) {
     extraWinnerHtml = `<p class="small">Team A: ${payload.teamHp.A || 0} hp · Team B: ${payload.teamHp.B || 0} hp</p>`;
   } else if (gg.gameMode === "br" && payload.alive) {
     const aliveNames = payload.alive.map((pid) => gg.scoreboard[pid]?.name).filter(Boolean);
-    if (aliveNames.length === 1) winnerText = `${aliveNames[0]} wint Battle Royale!`;
+    if (aliveNames.length === 1) winnerText = `${escapeHtml(aliveNames[0])} wint Battle Royale!`;
   }
 
   app.innerHTML = `
@@ -1912,7 +1685,7 @@ function onMpGameOver(payload) {
     </div>
     <div class="guesslist" style="margin-top:10px;">
       ${sorted.map((s, i) => `<div class="gitem">
-        <div class="name">${i+1}. ${s.name}</div>
+        <div class="name">${i+1}. ${escapeHtml(s.name)}</div>
         <div></div><div></div><div class="prox">${s.total} pts</div>
       </div>`).join("")}
     </div>
@@ -1932,8 +1705,8 @@ function onMpGameOver(payload) {
     </div>`}
     ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
-      <button class="btn" onclick="ggLeaveLobby()">${icon("chevronLeft", { size: "sm" })} Menu</button>
-      ${gg.isHost ? `<button class="btn primary" onclick="ggMpRestartGame()">${icon("refresh", { size: "sm" })} Nieuw spel in zelfde lobby</button>` : "<div></div>"}
+      <button class="btn" data-action="leave-lobby">${icon("chevronLeft", { size: "sm" })} Menu</button>
+      ${gg.isHost ? `<button class="btn primary" data-action="restart-mp-game">${icon("refresh", { size: "sm" })} Nieuw spel in zelfde lobby</button>` : "<div></div>"}
     </div>`;
   initAdSlots();
 
@@ -1949,7 +1722,7 @@ function onMpGameOver(payload) {
   }
 }
 
-window.ggMpRestartGame = function () {
+const ggMpRestartGame = function () {
   if (!gg.isHost) return;
   const roundBtn = document.querySelector("#restartRoundPills .gg-pill-btn.active");
   const rounds = roundBtn ? parseInt(roundBtn.dataset.v, 10) : gg.rounds;
@@ -1960,7 +1733,7 @@ window.ggMpRestartGame = function () {
   gg.difficulty = difficulty; gg.blackwhite = blackwhite;
   gg.room.send("restart", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode, difficulty, blackwhite });
   gg.room.send("settings", { rounds, locationSet: locSet, roundTime, gameMode: gg.gameMode, difficulty, blackwhite });
-  window.ggMpStartGame();
+  ggMpStartGame();
 };
 
 function onMpRestart(payload) {
@@ -1974,7 +1747,6 @@ function onMpRestart(payload) {
   gg.pointFn = buildPointFn(payload.locationSet);
 }
 
-// ---------- Shared: fullscreen round screen ----------
 
 function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   document.getElementById("ggFullscreenWrap")?.remove();
@@ -1988,18 +1760,18 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
       <div class="gg-pano-loading-text">Panorama laden...</div>
     </div>
     <div class="gg-hud-top" id="ggHudTop">
-      <button class="gg-hud-back-btn" onclick="ggExitToStart()">${icon("close", { size: "sm" })}</button>
+      <button class="gg-hud-back-btn" data-action="exit-to-start">${icon("close", { size: "sm" })}</button>
       <span class="gg-hud-pill">${roundLabel}</span>
       <span class="gg-hud-pill gg-hud-score" id="ggHudScore">${scoreLabel}</span>
-      ${gg.mode === "solo" || gg.mode === "daily" ? `<button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="Zit je vast? Krijg een andere locatie.">${icon("refresh", { size: "sm" })} Andere locatie</button>` : ""}
+      ${gg.mode === "solo" || gg.mode === "daily" ? `<button class="gg-hud-pill gg-hud-reroll" data-action="reroll-round" title="Zit je vast? Krijg een andere locatie.">${icon("refresh", { size: "sm" })} Andere locatie</button>` : ""}
     </div>
     ${gg.mode === "mp" && gg.myPowerup ? `
     <div class="gg-hud-left" style="position:absolute; left:20px; top:80px; display:flex; flex-direction:column; gap:10px; z-index:50;">
-      <button id="ggBtnPowerup" class="btn primary" style="opacity:${gg.usedPowerup ? "0.5" : "1"}; box-shadow:0 4px 12px rgba(0,0,0,0.3);" onclick="ggUsePowerup()" ${gg.usedPowerup ? "disabled" : ""}>
-        ${icon("star", { size: "sm" })} Power-up: ${gg.myPowerup}
+      <button id="ggBtnPowerup" class="btn primary" style="opacity:${gg.usedPowerup ? "0.5" : "1"}; box-shadow:0 4px 12px rgba(0,0,0,0.3);" data-action="use-powerup" ${gg.usedPowerup ? "disabled" : ""}>
+        ${icon("star", { size: "sm" })} Power-up: ${bonusLabel(gg.myPowerup, getLanguage())}
       </button>
-      <button id="ggBtnSabotage" class="btn" style="background:#e74c3c; color:white; border:none; opacity:${gg.usedSabotage ? "0.5" : "1"}; box-shadow:0 4px 12px rgba(0,0,0,0.3);" onclick="ggUseSabotageMenu()" ${gg.usedSabotage ? "disabled" : ""}>
-        ${icon("alertTriangle", { size: "sm" })} Sabotage: ${gg.mySabotage}
+      <button id="ggBtnSabotage" class="btn" style="background:#e74c3c; color:white; border:none; opacity:${gg.usedSabotage ? "0.5" : "1"}; box-shadow:0 4px 12px rgba(0,0,0,0.3);" data-action="show-sabotage-menu" ${gg.usedSabotage ? "disabled" : ""}>
+        ${icon("alertTriangle", { size: "sm" })} Sabotage: ${bonusLabel(gg.mySabotage, getLanguage())}
       </button>
     </div>
     ` : ""}
@@ -2024,9 +1796,7 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   gg.onSubmitHandler = onSubmit;
   document.getElementById("ggSubmitBtn").onclick = () => gg.onSubmitHandler();
 
-  // Map corner grows on hover (like OpenGuessr) instead of a toggle button.
-  // Google Maps needs an explicit resize nudge once the CSS transition
-  // finishes, otherwise the tiles stay cropped to the old size.
+  // Resize Google Maps after the expanding corner finishes animating.
   const mapCorner = document.getElementById("ggMapCorner");
   const nudgeMapResize = () => {
     if (!gg.map) return;
@@ -2037,9 +1807,7 @@ function drawRoundScreen({ roundLabel, scoreLabel, onSubmit }) {
   mapCorner.addEventListener("focus", () => setTimeout(nudgeMapResize, 310));
   mapCorner.addEventListener("blur", () => setTimeout(nudgeMapResize, 310));
 
-  // Hover/focus-within werkt niet betrouwbaar op touch-schermen, dus een
-  // expliciete tik-knop om de kaart te vergroten/verkleinen (ook handig op
-  // desktop als je niet aan het hoveren wil zitten).
+  // Give touch users an explicit map expansion control.
   document.getElementById("ggMapExpandBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
     mapCorner.classList.toggle("gg-expanded");
@@ -2056,9 +1824,7 @@ async function initPanorama(round) {
   gg.panorama = createPanorama(maps, el, round, { noMove });
   el.classList.toggle("gg-grayscale", !!gg.blackwhite);
 
-  // NMPZ: no movement, no panning/zooming at all — a transparent blocker
-  // absorbs every mouse/touch/scroll event before it reaches the panorama.
-  // The Street View API has no "freeze" option, so this is the reliable way.
+  // Block all panorama input because Street View has no complete freeze option.
   if (gg.difficulty === "nmpz") {
     const wrap = document.getElementById("ggFullscreenWrap");
     if (wrap && !document.getElementById("ggNmpzBlocker")) {
@@ -2069,22 +1835,17 @@ async function initPanorama(round) {
     }
   }
 
-  // Hide the loading overlay once the panorama actually has imagery to show,
-  // instead of leaving a bare black screen while the tiles fetch.
+  // Keep the loader visible until panorama imagery is ready.
   const hideLoading = () => document.getElementById("ggPanoLoading")?.classList.add("gg-hidden");
   maps.event.addListenerOnce(gg.panorama, "status_changed", hideLoading);
   maps.event.addListenerOnce(gg.panorama, "pano_changed", hideLoading);
-  // Safety net in case neither event fires for some reason.
+  // Prevent a stale loader if the Maps events never fire.
   setTimeout(hideLoading, 4000);
 
   updateCheatHint();
 }
 
-// ---------- Gokmodus: waag je rondepunten bij het rad ----------
-// Bewegen/rondkijken is in deze modus helemaal vrij — het gokaspect zit 'm
-// puur in de score: na elke ronde mag je je verdiende punten veilig
-// incasseren, of ze wagen bij een roulette-rad voor een kans op meer
-// (rood/zwart = x2, groen = x5, mis = die ronde 0 punten).
+// Gamble mode lets players bank points or risk them on the wheel.
 
 const ROULETTE_RED = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
 function rouletteColor(n) {
@@ -2092,7 +1853,7 @@ function rouletteColor(n) {
   return ROULETTE_RED.has(n) ? "red" : "black";
 }
 
-window.ggBankPoints = function () {
+const ggBankPoints = function () {
   if (gg.pendingPts == null) return;
   gg.totalScore += gg.pendingPts;
   gg.history.push({ km: gg.pendingKm, pts: gg.pendingPts, country: gg.current.countryHint });
@@ -2101,7 +1862,7 @@ window.ggBankPoints = function () {
   ggResolveWager();
 };
 
-window.ggOpenWager = function () {
+const ggOpenWager = function () {
   const wrap = document.getElementById("ggFullscreenWrap");
   if (!wrap || gg.pendingPts == null || document.getElementById("ggWagerOverlay")) return;
   const pts = gg.pendingPts;
@@ -2119,7 +1880,7 @@ window.ggOpenWager = function () {
         <button class="gg-roulette-color-btn gg-roulette-green" data-c="green">Groen ×5</button>
       </div>
       <div class="gg-roulette-actions" id="ggWagerActions">
-        <button class="btn" onclick="ggCancelWager()">Terug</button>
+        <button class="btn" data-action="cancel-wager">Terug</button>
         <button class="btn primary" id="ggWagerSpinBtn" disabled>${icon("refresh", { size: "sm" })} Draai</button>
       </div>
     </div>`;
@@ -2140,7 +1901,7 @@ window.ggOpenWager = function () {
   });
 };
 
-window.ggCancelWager = function () {
+const ggCancelWager = function () {
   document.getElementById("ggWagerOverlay")?.remove();
 };
 
@@ -2189,14 +1950,10 @@ function ggWagerShowResult(won, payout, mult) {
   msg.style.textAlign = "center";
   msg.innerHTML = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
   modal.insertBefore(msg, actions);
-  actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager(); ggResolveWager();" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
+  actions.innerHTML = `<button class="btn primary" data-action="resolve-wager" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
 }
 
-// Let op: wordt ook aangeroepen vanuit een inline onclick-attribuut (de
-// "Verder"-knop hierboven), dat in de globale scope draait, niet in de
-// scope van deze module — daarom moet dit een window-functie zijn, anders
-// gooit de browser een stille ReferenceError en blijft het gokpaneel hangen.
-window.ggResolveWager = function () {
+const ggResolveWager = function () {
   document.getElementById("ggWagerPanel")?.remove();
   const stat = document.querySelector("#ggResultOverlay .gg-result-stat");
   if (stat) stat.innerHTML = `Totaal: ${gg.totalScore} pts`;
@@ -2204,13 +1961,7 @@ window.ggResolveWager = function () {
   if (nextBtn) nextBtn.style.display = "";
 };
 
-// ---------- Gokmodus in multiplayer: zelfde idee, maar de uitkomst gaat via
-// de host naar het gedeelde scorebord (elke speler waagt alleen zijn eigen
-// punten — nooit die van een ander). ----------
-
-// Host-only: verwerkt de definitieve uitkomst van een speler die zijn
-// ronde-punten heeft ingecasseerd of gewaagd, telt 'm bij het scorebord op
-// en stuurt de bijgewerkte stand naar iedereen door.
+// The host applies each player's final gamble result to the shared scoreboard.
 function onMpWagerReceived(payload) {
   if (!gg.isHost) return;
   if (!gg.scoreboard[payload.playerId]) gg.scoreboard[payload.playerId] = { name: payload.name || "Speler", total: 0 };
@@ -2218,22 +1969,18 @@ function onMpWagerReceived(payload) {
   gg.room.send("scoreupdate", { scoreboard: gg.scoreboard });
 }
 
-// Iedereen (inclusief de host zelf) ontvangt de bijgewerkte stand en werkt
-// de zichtbare totaalscore-lijst op het resultatenscherm live bij, zonder
-// een eventueel open gokpaneel/rad van een andere speler te verstoren.
+// Update only the live scoreboard so open gamble overlays remain intact.
 function onMpScoreUpdateReceived(payload) {
   gg.scoreboard = payload.scoreboard;
   if (gg.screen !== "results") return;
   const list = document.getElementById("ggMpTotalScoreList");
   if (!list) return;
   list.innerHTML = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total)
-    .map((s) => `<div class="gitem"><div class="name">${s.name}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
+    .map((s) => `<div class="gitem"><div class="name">${escapeHtml(s.name)}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
     .join("");
 }
 
-// Stuurt het eindresultaat van je eigen gok (incasseren of gokuitslag) naar
-// de host, en werkt je eigen scorebord alvast optimistisch bij zodat het
-// niet knippert terwijl het antwoord van de host onderweg is.
+// Apply local gamble results optimistically before host confirmation.
 function ggMpSendWagerResult(delta) {
   if (!gg.scoreboard[gg.playerId]) gg.scoreboard[gg.playerId] = { name: gg.name, total: 0 };
   gg.scoreboard[gg.playerId].total += delta;
@@ -2241,12 +1988,12 @@ function ggMpSendWagerResult(delta) {
   const list = document.getElementById("ggMpTotalScoreList");
   if (list) {
     list.innerHTML = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total)
-      .map((s) => `<div class="gitem"><div class="name">${s.name}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
+      .map((s) => `<div class="gitem"><div class="name">${escapeHtml(s.name)}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
       .join("");
   }
 }
 
-window.ggMpBankPoints = function () {
+const ggMpBankPoints = function () {
   if (!gg.pendingMpWager) return;
   const pts = gg.pendingMpWager.pts;
   gg.pendingMpWager = null;
@@ -2254,7 +2001,7 @@ window.ggMpBankPoints = function () {
   ggMpSendWagerResult(pts);
 };
 
-window.ggMpOpenWager = function () {
+const ggMpOpenWager = function () {
   if (!gg.pendingMpWager || document.getElementById("ggWagerOverlay")) return;
   const pts = gg.pendingMpWager.pts;
   const overlay = document.createElement("div");
@@ -2271,7 +2018,7 @@ window.ggMpOpenWager = function () {
         <button class="gg-roulette-color-btn gg-roulette-green" data-c="green">Groen ×5</button>
       </div>
       <div class="gg-roulette-actions" id="ggWagerActions">
-        <button class="btn" onclick="ggCancelWager()">Terug</button>
+        <button class="btn" data-action="cancel-wager">Terug</button>
         <button class="btn primary" id="ggWagerSpinBtn" disabled>${icon("refresh", { size: "sm" })} Draai</button>
       </div>
     </div>`;
@@ -2333,11 +2080,10 @@ function ggMpWagerShowResult(won, payout, mult) {
   msg.style.textAlign = "center";
   msg.innerHTML = won ? `${icon("check", { size: "sm" })} Geraakt (×${mult})! +${payout} pts` : `${icon("close", { size: "sm" })} Mis — deze ronde 0 pts.`;
   modal.insertBefore(msg, actions);
-  actions.innerHTML = `<button class="btn primary" onclick="ggCancelWager()" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
+  actions.innerHTML = `<button class="btn primary" data-action="cancel-wager" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
 }
 
-// ---------- Power-ups & Sabotages ----------
-window.ggUsePowerup = function () {
+const ggUsePowerup = function () {
   if (gg.usedPowerup) return;
   gg.usedPowerup = true;
   document.getElementById("ggBtnPowerup").disabled = true;
@@ -2353,14 +2099,14 @@ window.ggUsePowerup = function () {
   } else if (gg.myPowerup === "5050") {
     const others = ["Nederland", "België", "Duitsland", "Frankrijk", "Spanje", "Italië", "Verenigde Staten", "Japan", "Brazilië", "Australië", "Zuid-Afrika"];
     let other = others[Math.floor(Math.random() * others.length)];
-    if (other === gg.current.countryHint) other = "Canada"; // fallback
+    if (other === gg.current.countryHint) other = "Canada";
     const options = [gg.current.countryHint, other].sort(() => Math.random() - 0.5);
     showConnBanner(`💡 50/50: Het is <strong>${options[0]}</strong> of <strong>${options[1]}</strong>`);
     setTimeout(() => hideConnBanner(), 5000);
   }
 };
 
-window.ggUseSabotageMenu = function () {
+const ggUseSabotageMenu = function () {
   if (gg.usedSabotage) return;
   const wrap = document.getElementById("ggFullscreenWrap");
   if (!wrap) return;
@@ -2377,41 +2123,45 @@ window.ggUseSabotageMenu = function () {
 
   const listHtml = alivePlayers.map(pid => {
     const name = gg.scoreboard[pid]?.name || "Speler";
-    return `<button class="btn" style="width:100%; margin-bottom:8px;" onclick="ggSendSabotage('${pid}', '${name}')">${name}</button>`;
+    return `<button class="btn gg-sabotage-target" data-target="${escapeHtml(pid)}" style="width:100%; margin-bottom:8px;">${escapeHtml(name)}</button>`;
   }).join("");
 
   overlay.innerHTML = `
     <div class="gg-roulette-modal">
       <h3>Kies een doelwit</h3>
-      <p class="small" style="margin-bottom:12px;">Sabotage: ${gg.mySabotage}</p>
+      <p class="small" style="margin-bottom:12px;">Sabotage: ${bonusLabel(gg.mySabotage, getLanguage())}</p>
       ${listHtml}
-      <button class="btn" onclick="document.getElementById('ggSabotageMenu').remove()" style="width:100%; margin-top:8px;">Annuleren</button>
+      <button class="btn" data-action="close-sabotage-menu" style="width:100%; margin-top:8px;">Annuleren</button>
     </div>`;
   wrap.appendChild(overlay);
+  overlay.querySelectorAll(".gg-sabotage-target").forEach((button) => {
+    button.addEventListener("click", () => ggSendSabotage(button.dataset.target));
+  });
 };
 
-window.ggSendSabotage = function (targetId, targetName) {
+const ggSendSabotage = function (targetId) {
   document.getElementById("ggSabotageMenu")?.remove();
   if (gg.usedSabotage) return;
+  const targetName = gg.scoreboard[targetId]?.name || pick("Player", "Speler");
   gg.usedSabotage = true;
   document.getElementById("ggBtnSabotage").disabled = true;
   document.getElementById("ggBtnSabotage").style.opacity = "0.5";
 
-  gg.room.send("sabotage", { target: targetId, type: gg.mySabotage, fromName: gg.name });
-  showConnBanner(`${icon("alertTriangle", { size: "sm" })} Sabotage '${gg.mySabotage}' ingezet op ${targetName}!`);
+  gg.room.send("sabotage", { target: targetId, sabotageType: gg.mySabotage, fromName: gg.name });
+  showConnBanner(`${icon("alertTriangle", { size: "sm" })} ${pick("Used", "Sabotage")} '${bonusLabel(gg.mySabotage, getLanguage())}' ${pick("on", "ingezet op")} ${escapeHtml(targetName)}!`);
   setTimeout(() => hideConnBanner(), 3000);
 };
 
 function onMpSabotageReceived(payload) {
   if (payload.target !== gg.playerId) return;
 
-  if (payload.type === "fakehint") {
+  if (payload.sabotageType === "fakehint") {
     const fakes = ["Verenigde Staten", "Frankrijk", "Rusland", "Brazilië", "India", "Zuid-Afrika", "Mexico", "China"];
     let fake = fakes[Math.floor(Math.random() * fakes.length)];
     if (fake === gg.current?.countryHint) fake = "IJsland"; // fallback
     showConnBanner(`💡 HINT: Het is <strong>${fake}</strong>`);
     setTimeout(() => hideConnBanner(), 5000);
-  } else if (payload.type === "ink") {
+  } else if (payload.sabotageType === "ink") {
     const wrap = document.getElementById("ggFullscreenWrap");
     if (wrap) {
       const ink = document.createElement("div");
@@ -2421,14 +2171,18 @@ function onMpSabotageReceived(payload) {
       ink.style.backdropFilter = "blur(15px) contrast(0.8) brightness(0.5)";
       ink.style.zIndex = "999";
       ink.style.pointerEvents = "none";
-      ink.innerHTML = `<div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:white; font-size:24px; font-weight:bold; text-align:center; text-shadow: 2px 2px 4px rgba(0,0,0,0.8);">Je bent gesaboteerd door ${payload.fromName}! (Inktvlek)</div>`;
+      const message = document.createElement("div");
+      message.className = "gg-sabotage-message";
+      message.textContent = pick(`Sabotaged by ${payload.fromName}!`, `Je bent gesaboteerd door ${payload.fromName}!`);
+      ink.appendChild(message);
       wrap.appendChild(ink);
       setTimeout(() => ink.remove(), 5000);
     }
-  } else if (payload.type === "nocompass") {
+  } else if (payload.sabotageType === "spin") {
     if (gg.panorama) {
-      gg.panorama.setOptions({ panControl: false });
-      showConnBanner(`${icon("alertTriangle", { size: "sm" })} \${payload.fromName} heeft je kompas kapot gemaakt voor deze ronde!`);
+      const currentPov = gg.panorama.getPov();
+      gg.panorama.setPov({ heading: (currentPov.heading + 180) % 360, pitch: -currentPov.pitch });
+      showConnBanner(`${icon("alertTriangle", { size: "sm" })} ${escapeHtml(payload.fromName)} ${pick("turned your view around!", "heeft je blik omgedraaid!")}`);
       setTimeout(() => hideConnBanner(), 5000);
     }
   }
@@ -2479,3 +2233,40 @@ function initMap(mapsApi) {
     if (btn) btn.removeAttribute("disabled");
   });
 }
+
+const GEO_ACTIONS = {
+  "dismiss-reconnect": () => ggDismissReconnect(),
+  "reconnect-lobby": () => ggReconnectLobby(),
+  "auto-join": (control) => ggAutoJoin(control.dataset.code),
+  "show-start": () => ggShowStart(),
+  "show-solo-settings": () => ggShowSoloSettings(),
+  "start-solo": () => ggStartSolo(),
+  "start-streak": () => ggStartStreak(),
+  "start-daily": () => ggStartDaily(),
+  "exit-to-start": () => ggExitToStart(),
+  "reroll-round": () => ggRerollRound(),
+  "bank-points": () => ggBankPoints(),
+  "open-wager": () => ggOpenWager(),
+  "replay-solo-settings": () => ggReplaySoloSettings(),
+  "show-multiplayer-menu": () => ggShowMultiplayerMenu(),
+  "show-host-settings": () => ggShowMpHostSettings(),
+  "show-mp-join": () => ggShowMpJoin(),
+  "host-lobby": () => ggHostLobby(),
+  "randomize-teams": () => ggRandomizeTeams(),
+  "copy-link": () => ggCopyLink(),
+  "leave-lobby": () => ggLeaveLobby(),
+  "back-to-host-settings": () => ggBackToHostSettings(),
+  "start-mp-game": () => ggMpStartGame(),
+  "mp-bank-points": () => ggMpBankPoints(),
+  "mp-open-wager": () => ggMpOpenWager(),
+  "mp-next": () => ggMpNextFromHost(),
+  "restart-mp-game": () => ggMpRestartGame(),
+  "use-powerup": () => ggUsePowerup(),
+  "show-sabotage-menu": () => ggUseSabotageMenu(),
+  "cancel-wager": () => ggCancelWager(),
+  "resolve-wager": () => {
+    ggCancelWager();
+    ggResolveWager();
+  },
+  "close-sabotage-menu": () => document.getElementById("ggSabotageMenu")?.remove(),
+};

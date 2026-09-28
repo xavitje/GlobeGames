@@ -8,6 +8,8 @@
     "dev": "vite",
     "prebuild": "node scripts/build-geo.mjs",
     "build": "vite build",
+    "check": "node scripts/check-source.mjs",
+    "test": "node --test --test-isolation=none",
     "preview": "vite preview"
   },
   "dependencies": {

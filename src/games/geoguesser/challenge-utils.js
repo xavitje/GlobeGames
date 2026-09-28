@@ -18,9 +18,8 @@ export function mulberry32(seed) {
   };
 }
 
-export function getDailyKey() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+export function getDailyKey(date = new Date()) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
 export function getDailyResult() {

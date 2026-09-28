@@ -1,26 +1,22 @@
 :root {
-  /* Kleur */
-  --bg: #f4f5f7;
-  --panel: #ffffff;
-  --panel2: #eef0f3;
-  --ink: #151821;
-  --sub: #5b6270;
-  --accent: #7c5cff;
+  color-scheme: light dark;
+  --bg: light-dark(#eef0f5, #090a10);
+  --panel: light-dark(#f8f9fb, #10121a);
+  --panel2: light-dark(#e7e9ef, #171a24);
+  --ink: light-dark(#11131a, #f3f4f8);
+  --sub: light-dark(#666c7a, #9298a8);
+  --accent: #8073ff;
   --accent-ink: #ffffff;
-  --border: #dfe2e8;
+  --border: light-dark(#d9dce4, #252936);
   --danger: #c94a4a;
-  --good: #1fa971;
+  --good: #40b997;
   --warn: #b8842c;
-  --shadow: 0 2px 10px rgba(20, 22, 30, 0.06);
-  --shadow-lg: 0 16px 40px rgba(20, 22, 30, 0.16);
-  /* Vaste (niet per thema wisselende) tinten voor tekst boven de donkere
-     HUD-chips die over een streetview-foto liggen — die achtergrond is
-     altijd donker, ongeacht licht/donker-thema van de site zelf. */
+  --shadow: 0 8px 24px light-dark(#252a3b18, #00000050);
+  --shadow-lg: 0 24px 60px light-dark(#252a3b2b, #0000008a);
+  /* Fixed tints remain legible on dark game overlays. */
   --good-tint: #7fe3b4;
   --warn-tint: #f0c168;
   --danger-tint: #ff9aa3;
-  /* Nog meer vaste (niet per thema wisselende) tinten: kaart-placeholder en
-     roulettewiel-vlakken liggen altijd op een donkere ondergrond. */
   --map-bg: #1a2234;
   --wheel-black: #202225;
   --wheel-default: #55596b;
@@ -29,15 +25,13 @@
   --globe-land: #dfe4ea;
   --globe-land-stroke: #b9c0cc;
 
-  /* Hoek-schaal: nooit scherp. sm = inputs/knoppen, md = cards/panels,
-     lg = grote vlakken/modals, pill = volledig rond (badges/pill-knoppen). */
-  --radius-sm: 10px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
   --radius-pill: 999px;
-  --radius: var(--radius-md); /* alias, bestaand gebruik blijft werken */
+  --radius: var(--radius-md);
 
-  /* Spacing-schaal (4/8/12/16/20/24/32/48) */
+  /* Spacing follows a 4px base scale. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -2201,34 +2195,6 @@ a.linklike {
   margin: 0;
 }
 
-/* ==========================================================================
-   ATLAS STUDIO BRAND SYSTEM
-   Obsidian / Pearl / Ultraviolet / Glacier / Mineral
-   Surface radius 24px, control radius 12px, three deliberate depth levels.
-   ========================================================================== */
-:root {
-  color-scheme: light dark;
-  --bg: light-dark(#eef0f5, #090a10);
-  --panel: light-dark(#f8f9fb, #10121a);
-  --panel2: light-dark(#e7e9ef, #171a24);
-  --ink: light-dark(#11131a, #f3f4f8);
-  --sub: light-dark(#666c7a, #9298a8);
-  --border: light-dark(#d9dce4, #252936);
-  --accent: #8073ff;
-  --accent-ink: #fff;
-  --good: #40b997;
-  --shadow: 0 8px 24px light-dark(#252a3b18, #00000050);
-  --shadow-lg: 0 24px 60px light-dark(#252a3b2b, #0000008a);
-  --radius-sm: 12px;
-  --radius-md: 18px;
-  --radius-lg: 24px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #090a10; --panel: #10121a; --panel2: #171a24; --ink: #f3f4f8;
-    --sub: #9298a8; --border: #252936; --accent: #8073ff;
-  }
-}
 body {
   min-height: 100vh;
   font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
@@ -2377,3 +2343,14 @@ input, select, .gg-select { min-height: 44px; border-radius: 12px !important; bo
   .atlas-brand > span:last-child { display: none; }.atlas-hub-intro h1 { font-size: 36px; }.atlas-filter-row > span { display: none; }.account-value h1 { font-size: 38px; }.account-auth-panel, .account-settings-panel { padding: 20px; }.account-settings-nav { grid-template-columns: 1fr; }.atlas-pin { right: 38px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+.gg-sabotage-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: white;
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
+  text-shadow: 2px 2px 4px rgb(0 0 0 / 80%);
+  transform: translate(-50%, -50%);
+}

@@ -117,15 +117,17 @@ function draw() {
   const guesses = game.guesses.map((guess) => `<div class="gitem ${guess.correct ? "correct" : ""}"><div class="name">${flagEmoji(COUNTRY_DATA[guess.name].i)} ${countryName(guess.name)}</div><div class="dist">${guess.correct ? "" : Math.round(guess.km).toLocaleString() + " km"}</div><div></div><div class="prox">${guess.correct ? icon("check", { size: "sm" }) : guess.prox + "%"}</div></div>`).join("");
   app.innerHTML = `${topbar()}<div class="gametitle"><div><h2>${icon("globe", { size: "sm" })} GlobeGuess</h2><div class="desc">${pick("Find the mystery country — warmer colours mean you are closer.", "Raad het mysterieland — hoe warmer de kleur, hoe dichterbij.")}</div></div><div class="pillrow"><span class="pill">${pick("Guesses", "Gokken")}: <span class="n">${game.guesses.length}</span></span></div></div>
     <div class="globe-wrap" id="globeContainer"></div>
-    ${game.over ? `<div class="msg good" style="text-align:center;font-size:16px;">${pick("The mystery country is", "Het mysterieland is")} ${countryName(game.target)}! ${flagEmoji(COUNTRY_DATA[game.target].i)}</div>` : `<div class="inputrow"><input id="glInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="glAuto"></div><button onclick="glSubmit()">${pick("Submit", "Gok")}</button></div>`}
-    ${game.over ? adSlotHtml("globleEnd") : ""}<div class="guesslist">${guesses}</div><div class="footerrow"><div class="small">${pick("Drag to rotate · scroll to zoom", "Sleep om te draaien · scroll om te zoomen")}</div><button class="btn" onclick="glNewGame()">${icon("refresh", { size: "sm" })} ${pick("New country", "Nieuw land")}</button></div>`;
+    ${game.over ? `<div class="msg good" style="text-align:center;font-size:16px;">${pick("The mystery country is", "Het mysterieland is")} ${countryName(game.target)}! ${flagEmoji(COUNTRY_DATA[game.target].i)}</div>` : `<div class="inputrow"><input id="glInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="glAuto"></div><button id="glSubmit">${pick("Submit", "Gok")}</button></div>`}
+    ${game.over ? adSlotHtml("globleEnd") : ""}<div class="guesslist">${guesses}</div><div class="footerrow"><div class="small">${pick("Drag to rotate · scroll to zoom", "Sleep om te draaien · scroll om te zoomen")}</div><button id="glNewGame" class="btn">${icon("refresh", { size: "sm" })} ${pick("New country", "Nieuw land")}</button></div>`;
   mountGlobe(document.getElementById("globeContainer"));
   initAdSlots();
+  document.getElementById("glNewGame")?.addEventListener("click", () => renderGlobleGame(app));
   if (!game.over) {
     const input = document.getElementById("glInput");
     const names = ALL_NAMES.filter((name) => worldByName()[name] && !game.guesses.some((guess) => guess.name === name));
     attachAutocomplete(input, document.getElementById("glAuto"), localizedCountryCandidates(names), () => {});
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
+    document.getElementById("glSubmit").addEventListener("click", submit);
     input.focus();
   }
 }
@@ -145,6 +147,3 @@ function submit() {
   if (correct) game.over = true;
   draw();
 }
-
-window.glSubmit = submit;
-window.glNewGame = () => renderGlobleGame(app);

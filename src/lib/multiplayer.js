@@ -2,6 +2,11 @@ import { getSupabase, hasSupabaseConfig } from "./supabase.js";
 const ROOM_PREFIX = "globegames-gg-";
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+export function normalizePlayerName(value, fallback = "Player") {
+  const name = String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 18);
+  return name || fallback;
+}
+
 export function hasMultiplayerConfig() {
   return hasSupabaseConfig();
 }
@@ -24,13 +29,12 @@ export function randomPlayerId() {
   );
 }
 
-// A thin wrapper around a Supabase Realtime channel for one game room.
-// Handles presence (who's in the lobby) and broadcast messaging (game events).
+// Own one Supabase Realtime room and its connection lifecycle.
 export class GameRoom {
   constructor(code, playerId, name) {
-    this.code = code.toUpperCase();
+    this.code = String(code).toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
     this.playerId = playerId;
-    this.name = name;
+    this.name = normalizePlayerName(name);
     this.channel = null;
     this.listeners = {};
     this.presenceListeners = [];
@@ -50,8 +54,7 @@ export class GameRoom {
     return this;
   }
 
-  // handler(status) where status is "disconnected" or "reconnected" —
-  // fired only after the *initial* connect() has already resolved.
+  // Report connection changes after the initial connection succeeds.
   onConnectionChange(handler) {
     this.connectionListeners.push(handler);
     return this;
@@ -62,9 +65,12 @@ export class GameRoom {
     const state = this.channel.presenceState();
     const out = [];
     Object.values(state).forEach((entries) => {
-      entries.forEach((e) => out.push({ playerId: e.playerId, name: e.name }));
+      entries.forEach((entry) => {
+        if (typeof entry.playerId !== "string") return;
+        out.push({ playerId: entry.playerId.slice(0, 80), name: normalizePlayerName(entry.name) });
+      });
     });
-    // De-dupe by playerId (a player can briefly have >1 presence entry across reconnects)
+    // Reconnects can briefly create duplicate presence entries.
     const seen = new Map();
     out.forEach((p) => seen.set(p.playerId, p));
     return [...seen.values()];
@@ -112,8 +118,7 @@ export class GameRoom {
     });
   }
 
-  // Automatic reconnect-after-disconnect with backoff, re-using the same
-  // playerId so presence/late-joiner logic recognizes this as the same player.
+  // Reuse the player ID during exponential-backoff reconnects.
   _scheduleReconnect() {
     if (this.intentionalLeave || this.reconnectTimer) return;
     this.reconnectAttempts++;
@@ -128,10 +133,11 @@ export class GameRoom {
 
   send(type, data) {
     if (!this.channel) return;
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(type)) throw new Error("Invalid multiplayer event type");
     this.channel.send({
       type: "broadcast",
       event: "game",
-      payload: { type, from: this.playerId, ...data },
+      payload: { ...(data || {}), type, from: this.playerId },
     });
   }
 
@@ -142,5 +148,8 @@ export class GameRoom {
       getClient().removeChannel(this.channel);
       this.channel = null;
     }
+    this.listeners = {};
+    this.presenceListeners = [];
+    this.connectionListeners = [];
   }
 }

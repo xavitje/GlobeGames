@@ -1,6 +1,4 @@
-// Each country has an array of {name, lat, lon} points.
-// The FIRST entry is always the capital (used for "capitals" set).
-// Additional entries are major cities (used for "bigcities" / general random sets).
+// The first point is the capital; remaining points are major cities.
 export const GEO_POINTS = {
   "United States of America": [
     { name: "Washington, D.C.", lat: 38.9, lon: -77.04 },
@@ -565,7 +563,6 @@ export const GEO_POINTS = {
   ],
 };
 
-// ---- Continent groupings ----
 export const CONTINENT_MAP = {
   europe: [
     "United Kingdom","France","Germany","Spain","Italy","Netherlands","Belgium",
@@ -596,8 +593,7 @@ export const CONTINENT_MAP = {
   ],
 };
 
-// ---- Location sets ----
-// Each set defines which countries are eligible and optionally restricts to only the capital (index 0).
+// Location sets optionally restrict selection to capital points.
 export const LOCATION_SETS = {
   world: {
     label: "Hele wereld",
@@ -611,7 +607,6 @@ export const LOCATION_SETS = {
   },
   bigcities: {
     label: "Grote steden",
-    // Only countries with more than 1 point
     countries: Object.keys(GEO_POINTS).filter((c) => GEO_POINTS[c].length > 1),
     onlyCapital: false,
   },

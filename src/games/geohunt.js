@@ -73,11 +73,11 @@ function draw() {
     const key = `${row}-${col}`;
     const answer = game.filled[key];
     if (answer) return `<div class="gcell filled"><div class="flagemoji">${flagEmoji(answer.iso2)}</div><div>${countryName(answer.name)}</div><div class="pts ${answer.rare ? "rare" : ""}">${answer.pts} pts</div></div>`;
-    return `<button type="button" class="gcell answer" onclick="ghOpenCell(${row},${col})" id="cell-${key}" aria-label="${pick("Answer cell", "Antwoordvak")}"></button>`;
+    return `<button type="button" class="gcell answer" data-row="${row}" data-col="${col}" id="cell-${key}" aria-label="${pick("Answer cell", "Antwoordvak")}"></button>`;
   };
   app.innerHTML = `${topbar()}
     <div class="gametitle"><div><h2>${icon("grid", { size: "sm" })} GeoHunt</h2><div class="desc">${pick("Fill every cell with a country that matches its row and column clues.", "Vul elk vakje met een land dat aan de rij- én kolomcriteria voldoet.")}</div></div>
-      <div class="pillrow"><span class="pill">${pick("Board", "Bord")} 1</span><select class="pill-select" aria-label="${pick("Difficulty", "Moeilijkheid")}" onchange="ghChangeDifficulty(this.value)">${DIFFICULTIES.map((item) => `<option value="${item.key}" ${item.key === game.difficulty ? "selected" : ""}>${difficultyLabel(item)}</option>`).join("")}</select></div></div>
+      <div class="pillrow"><span class="pill">${pick("Board", "Bord")} 1</span><select id="ghDifficulty" class="pill-select" aria-label="${pick("Difficulty", "Moeilijkheid")}">${DIFFICULTIES.map((item) => `<option value="${item.key}" ${item.key === game.difficulty ? "selected" : ""}>${difficultyLabel(item)}</option>`).join("")}</select></div></div>
     <div id="inputzone"></div>
     <div class="grid3">
       <div class="gcell corner"><span class="big" id="ghMistakesNum">${game.mistakes}</span><div class="small">${pick(`of ${game.maxMistakes} mistakes left`, `van ${game.maxMistakes} fouten over`)}</div></div>
@@ -86,9 +86,12 @@ function draw() {
       <div class="gcell criteria">${criterionLabel(rows[1])}</div>${cell(1, 0)}${cell(1, 1)}${cell(1, 2)}
       <div class="gcell criteria">${criterionLabel(rows[2])}</div>${cell(2, 0)}${cell(2, 1)}${cell(2, 2)}
     </div>
-    <div class="footerrow"><div class="scorebox"><span class="lbl">Score</span><span class="val">${game.score}</span></div><button class="btn" onclick="ghNewGame()">${icon("refresh", { size: "sm" })} ${pick("New game", "Nieuw spel")}</button></div>
+    <div class="footerrow"><div class="scorebox"><span class="lbl">Score</span><span class="val">${game.score}</span></div><button id="ghNewGame" class="btn">${icon("refresh", { size: "sm" })} ${pick("New game", "Nieuw spel")}</button></div>
     ${adSlotHtml("geohuntBoard")}`;
   initAdSlots();
+  app.querySelectorAll(".gcell.answer").forEach((button) => button.addEventListener("click", () => openCell(Number(button.dataset.row), Number(button.dataset.col))));
+  document.getElementById("ghDifficulty")?.addEventListener("change", (event) => changeDifficulty(event.target.value));
+  document.getElementById("ghNewGame")?.addEventListener("click", () => renderGeoHunt(app));
 }
 
 function submit() {
@@ -123,19 +126,26 @@ function endGame(won) {
   draw();
   const overlay = document.createElement("div");
   overlay.className = "overlay";
-  overlay.innerHTML = `<div class="overlaybox"><h3>${won ? icon("check", { size: "sm" }) + " " + pick("Board complete!", "Bord compleet!") : icon("warning", { size: "sm" }) + " " + pick("No mistakes left", "Geen fouten meer over")}</h3><p>${pick("Final score", "Eindscore")}: <strong>${game.score}</strong> ${pick("points", "punten")}</p><button class="btn primary" onclick="this.closest('.overlay').remove();ghNewGame();">${pick("New game", "Nieuw spel")}</button></div>`;
+  overlay.innerHTML = `<div class="overlaybox"><h3>${won ? icon("check", { size: "sm" }) + " " + pick("Board complete!", "Bord compleet!") : icon("warning", { size: "sm" }) + " " + pick("No mistakes left", "Geen fouten meer over")}</h3><p>${pick("Final score", "Eindscore")}: <strong>${game.score}</strong> ${pick("points", "punten")}</p><button class="btn primary">${pick("New game", "Nieuw spel")}</button></div>`;
   document.body.appendChild(overlay);
+  overlay.querySelector("button").addEventListener("click", () => {
+    overlay.remove();
+    renderGeoHunt(app);
+  });
 }
 
-window.ghOpenCell = (row, col) => {
+function openCell(row, col) {
   if (game.over) return;
   game.activeCell = [row, col];
-  document.getElementById("inputzone").innerHTML = `<div class="inputrow"><input id="ghInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="ghAuto"></div><button onclick="ghSubmit()">${pick("Submit", "Gok")}</button></div><div class="msg" id="ghMsg"></div>`;
+  document.getElementById("inputzone").innerHTML = `<div class="inputrow"><input id="ghInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="ghAuto"></div><button id="ghSubmit">${pick("Submit", "Gok")}</button></div><div class="msg" id="ghMsg"></div>`;
   const input = document.getElementById("ghInput");
   attachAutocomplete(input, document.getElementById("ghAuto"), localizedCountryCandidates(ALL_NAMES.filter((name) => !game.used.has(name))), () => {});
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
+  document.getElementById("ghSubmit").addEventListener("click", submit);
   input.focus();
-};
-window.ghSubmit = submit;
-window.ghNewGame = () => renderGeoHunt(app);
-window.ghChangeDifficulty = (key) => { localStorage.setItem("gg_geohunt_difficulty", key); renderGeoHunt(app); };
+}
+
+function changeDifficulty(key) {
+  localStorage.setItem("gg_geohunt_difficulty", key);
+  renderGeoHunt(app);
+}

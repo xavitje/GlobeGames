@@ -17,9 +17,7 @@ export function loadGoogleMaps() {
       resolve(window.google.maps);
     };
     const script = document.createElement("script");
-    // loading=async is Google's recommended loading pattern; without it the
-    // API can block/serialize its own startup work, which is likely what
-    // caused the slow "black world" first-load.
+    // Use Google's async loading mode to avoid blocking the first render.
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_KEY)}&v=weekly&loading=async&callback=${cbName}`;
     script.async = true;
     script.onerror = () => reject(new Error("Kon Google Maps niet laden"));
@@ -32,12 +30,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Looks for a real Street View panorama near (lat, lng), trying growing radii.
-// Rejects panoramas with no navigable links: those are dead-end/enclosed spots
-// (courtyards, building interiors Google mislabels as outdoor, private
-// driveways, etc.) where the player can't move and has no clues at all.
+// Reject panoramas without enough navigable exits.
 export async function findNearbyPanorama(maps, lat, lng, { minLinks = 2 } = {}) {
-  // Een hele kleine jitter (ongeveer 50-100 meter) om exact op de marker/indoor spawns te vermijden
+  // Offset the search slightly to avoid marker and indoor spawns.
   const jitterLat = (Math.random() - 0.5) * 0.001;
   const jitterLng = (Math.random() - 0.5) * 0.001;
   const searchLat = lat + jitterLat;
@@ -74,7 +69,6 @@ export async function findNearbyPanorama(maps, lat, lng, { minLinks = 2 } = {}) 
   return result;
 }
 
-// weightedRandomPointFn() -> { country, lat, lon }
 export async function findStreetViewRound(
   maps,
   weightedRandomPointFn,
@@ -100,37 +94,21 @@ export function createPanorama(maps, el, { lat, lng, pano }, options = {}) {
     motionTracking: false,
     motionTrackingControl: false,
     showRoadLabels: false,
-    // "Niet bewegen" difficulty: hide the walking arrows and disable click-to-walk
     linksControl: !noMove,
     clickToGo: !noMove,
-    // "Niet rondkijken" (NMPZ)
     panControl: !noPan,
     zoomControl: !noZoom,
     scrollwheel: !noZoom,
     disableDoubleClickZoom: noZoom,
     enableCloseUp: false,
   };
-  
-  // position is only needed if there's no pano ID
+  // A position is only needed when no panorama ID is available.
   if (pano == null && lat != null && lng != null) panoOptions.position = { lat, lng };
   const panorama = new maps.StreetViewPanorama(el, panoOptions);
-  
-  if (!noMove) warmNeighboringPanoramas(maps, panorama);
 
-  // Zorg dat je echt niet kunt slepen (pannen) in NMPZ
   if (noPan) {
     panorama.setOptions({ gestureHandling: "none" });
   }
 
   return panorama;
-}
-
-// Quietly asks Google for the panoramas one step away in every direction the
-// player could walk. This doesn't put anything in our own cache (Google
-// controls that), but it does warm up the connection/DNS/TLS and lets
-// Google's own CDN start working on those tiles before the player actually
-// clicks, so the next step tends to feel snappier.
-function warmNeighboringPanoramas(maps, panorama) {
-  // Disabled: fetching all neighboring panoramas on every movement causes API lag
-  // and connection limits to be hit, resulting in slow movement.
 }

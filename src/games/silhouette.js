@@ -42,17 +42,23 @@ function draw() {
   const answer = countryName(game.target);
   app.innerHTML = `${topbar()}
     <div class="gametitle"><div><h2>${icon("map", { size: "sm" })} ${pick("Shape Guess", "Vorm Raden")}</h2><div class="desc">${pick("Which country has this shape?", "Welk land heeft deze vorm?")}</div></div>
-      <div class="pillrow"><span class="pill">${pick("Guesses", "Gokken")}: <span class="n">${game.guesses.length}</span>${Number.isFinite(game.maxGuesses) ? `/${game.maxGuesses}` : ""}</span><select class="pill-select" aria-label="${pick("Difficulty", "Moeilijkheid")}" onchange="silChangeDifficulty(this.value)">${DIFFICULTIES.map((item) => `<option value="${item.key}" ${item.key === game.difficulty ? "selected" : ""}>${pick(item.en, item.nl)}</option>`).join("")}</select></div></div>
+      <div class="pillrow"><span class="pill">${pick("Guesses", "Gokken")}: <span class="n">${game.guesses.length}</span>${Number.isFinite(game.maxGuesses) ? `/${game.maxGuesses}` : ""}</span><select id="silDifficulty" class="pill-select" aria-label="${pick("Difficulty", "Moeilijkheid")}">${DIFFICULTIES.map((item) => `<option value="${item.key}" ${item.key === game.difficulty ? "selected" : ""}>${pick(item.en, item.nl)}</option>`).join("")}</select></div></div>
     <div class="shape-wrap ${game.over ? "revealed" : ""}">${shapeSvg()}</div>
-    ${game.over ? `<div class="msg ${game.failed ? "bad" : "good"}" style="text-align:center;font-size:16px;">${game.failed ? pick("No guesses left. ", "Helaas, geen gokken meer over. ") : ""}${pick("The answer is", "Het antwoord is")} ${answer}! ${flagEmoji(COUNTRY_DATA[game.target].i)}</div>` : `<div class="inputrow"><input id="silInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="silAuto"></div><button onclick="silSubmit()">${pick("Submit", "Gok")}</button></div>`}
+    ${game.over ? `<div class="msg ${game.failed ? "bad" : "good"}" style="text-align:center;font-size:16px;">${game.failed ? pick("No guesses left. ", "Helaas, geen gokken meer over. ") : ""}${pick("The answer is", "Het antwoord is")} ${answer}! ${flagEmoji(COUNTRY_DATA[game.target].i)}</div>` : `<div class="inputrow"><input id="silInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="silAuto"></div><button id="silSubmit">${pick("Submit", "Gok")}</button></div>`}
     <div class="guesslist">${guesses}</div>${adSlotHtml("silhouetteList")}
-    <div class="footerrow"><div></div><button class="btn" onclick="silNewGame()">${icon("refresh", { size: "sm" })} ${pick("New country", "Nieuw land")}</button></div>`;
+    <div class="footerrow"><div></div><button id="silNewGame" class="btn">${icon("refresh", { size: "sm" })} ${pick("New country", "Nieuw land")}</button></div>`;
   initAdSlots();
+  document.getElementById("silDifficulty")?.addEventListener("change", (event) => {
+    localStorage.setItem("gg_silhouette_difficulty", event.target.value);
+    renderSilhouette(app);
+  });
+  document.getElementById("silNewGame")?.addEventListener("click", () => renderSilhouette(app));
   if (!game.over) {
     const input = document.getElementById("silInput");
     const names = ALL_NAMES.filter((name) => worldByName()[name]);
     attachAutocomplete(input, document.getElementById("silAuto"), localizedCountryCandidates(names), () => {});
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
+    document.getElementById("silSubmit").addEventListener("click", submit);
     input.focus();
   }
 }
@@ -76,7 +82,3 @@ function submit() {
   if (game.guesses.length >= game.maxGuesses) { game.over = true; game.failed = true; }
   draw();
 }
-
-window.silSubmit = submit;
-window.silNewGame = () => renderSilhouette(app);
-window.silChangeDifficulty = (key) => { localStorage.setItem("gg_silhouette_difficulty", key); renderSilhouette(app); };

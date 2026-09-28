@@ -1,16 +1,169 @@
-import{COUNTRY_DATA}from"./data/countries.js";export const ALL_NAMES=Object.keys(COUNTRY_DATA).sort();function loadGeoJson(path){return fetch(`${path}?v=${typeof __GEO_BUILD_ID__!=="undefined"?__GEO_BUILD_ID__:Date.now()}`).then(r=>r.json())}let WORLD=null,WORLD_BY_NAME={};export function loadWorld(){return WORLD?Promise.resolve(WORLD):loadGeoJson(`${import.meta.env.BASE_URL}world.json`).then(data=>(WORLD=data,data.features.forEach(f=>WORLD_BY_NAME[f.properties.name]=f),WORLD))}export function worldByName(){return WORLD_BY_NAME}let WORLD_HD=null,WORLD_HD_BY_NAME={};export function loadWorldHD(){return WORLD_HD?Promise.resolve(WORLD_HD):loadGeoJson(`${import.meta.env.BASE_URL}world_hd.json`).then(data=>(WORLD_HD=data,data.features.forEach(f=>WORLD_HD_BY_NAME[f.properties.name]=f),WORLD_HD))}export function shapeFeatureFor(name){return WORLD_HD_BY_NAME[name]||WORLD_BY_NAME[name]}export function flagEmoji(iso2){if(!iso2||2!==iso2.length)return"🏳️";const A=127462;return String.fromCodePoint(A+(iso2.charCodeAt(0)-65))+String.fromCodePoint(A+(iso2.charCodeAt(1)-65))}export function toRad(d){return d*Math.PI/180}export function toDeg(r){return 180*r/Math.PI}export function haversineKm(a,b){const dLat=toRad(b[1]-a[1]),dLon=toRad(b[0]-a[0]),lat1=toRad(a[1]),lat2=toRad(b[1]),h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;return 12742*Math.asin(Math.min(1,Math.sqrt(h)))}export function bearing(a,b){const lat1=toRad(a[1]),lat2=toRad(b[1]),dLon=toRad(b[0]-a[0]),y=Math.sin(dLon)*Math.cos(lat2),x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);return(toDeg(Math.atan2(y,x))+360)%360}export function compassArrow(deg){return `<svg class="icon compass-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${Math.round(deg)}deg)"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg>`}export const MAX_DIST_KM=20015;export function proximityPct(km){return Math.max(0,Math.round(100-km/20015*100))}export function findCountryByLoose(name){const q=name.trim().toLowerCase();return ALL_NAMES.find(n=>n.toLowerCase()===q)}export function attachAutocomplete(input,dropdown,candidatesFn,onPick){let items=[],activeIdx=-1;function render(){if(!items.length)return dropdown.style.display="none",void(dropdown.innerHTML="");dropdown.innerHTML=items.map((n,i)=>`<div data-i="${i}" class="${i===activeIdx?"active":""}">${n}</div>`).join(""),dropdown.style.display="block",[...dropdown.children].forEach(el=>{el.addEventListener("mousedown",e=>{e.preventDefault(),pick(items[+el.dataset.i])})})}function pick(name){input.value=name,dropdown.style.display="none",items=[],activeIdx=-1,onPick(name)}input.addEventListener("input",()=>{const q=input.value.trim();items=q.length?candidatesFn(q).slice(0,8):[],activeIdx=-1,render()}),input.addEventListener("keydown",e=>{"ArrowDown"===e.key?(e.preventDefault(),activeIdx=Math.min(items.length-1,activeIdx+1),render()):"ArrowUp"===e.key?(e.preventDefault(),activeIdx=Math.max(0,activeIdx-1),render()):"Enter"===e.key?activeIdx>=0&&items[activeIdx]&&(e.preventDefault(),pick(items[activeIdx])):"Escape"===e.key&&(dropdown.style.display="none",items=[])}),document.addEventListener("click",e=>{e.target===input||dropdown.contains(e.target)||(dropdown.style.display="none")})}export function candidateNames(pool){return q=>pool.filter(n=>n.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>a.toLowerCase().indexOf(q.toLowerCase())-b.toLowerCase().indexOf(q.toLowerCase()))}export function topbar(){return `<div class="topbar">
-    <div class="brand" onclick="go('hub')">
-      <span class="brand-mark">${icon("globe",{size:"lg"})}</span>
-      <h1>Globe<span>Games</span></h1>
-    </div>
-    <button class="navbtn" onclick="go('hub')">${icon("chevronLeft",{size:"sm"})}<span>Alle spellen</span></button>
-  </div>`}
+import { COUNTRY_DATA } from "./data/countries.js";
+import { escapeHtml } from "./lib/html.js";
 
-// ---------- Icoon-systeem (geen emoji's) ----------
-// Kleine set lijn-iconen op een 24x24 grid, altijd `stroke="currentColor"` met
-// ronde lijnuiteinden — bewust dezelfde "nooit scherp"-taal als de rest van het
-// design. icon(name, {size, className}) geeft een losse <svg>-string terug die
-// direct in een template literal past.
+export const ALL_NAMES = Object.keys(COUNTRY_DATA).sort();
+export const MAX_DIST_KM = 20015;
+
+let world = null;
+let worldByNameCache = {};
+let worldHd = null;
+let worldHdByNameCache = {};
+
+function loadGeoJson(path) {
+  const buildId = typeof __GEO_BUILD_ID__ !== "undefined" ? __GEO_BUILD_ID__ : Date.now();
+  return fetch(`${path}?v=${buildId}`).then((response) => response.json());
+}
+
+function indexFeatures(data) {
+  return Object.fromEntries(data.features.map((feature) => [feature.properties.name, feature]));
+}
+
+export async function loadWorld() {
+  if (world) return world;
+  world = await loadGeoJson(`${import.meta.env.BASE_URL}world.json`);
+  worldByNameCache = indexFeatures(world);
+  return world;
+}
+
+export function worldByName() {
+  return worldByNameCache;
+}
+
+export async function loadWorldHD() {
+  if (worldHd) return worldHd;
+  worldHd = await loadGeoJson(`${import.meta.env.BASE_URL}world_hd.json`);
+  worldHdByNameCache = indexFeatures(worldHd);
+  return worldHd;
+}
+
+export function shapeFeatureFor(name) {
+  return worldHdByNameCache[name] || worldByNameCache[name];
+}
+
+export function flagEmoji(iso2) {
+  if (!iso2 || iso2.length !== 2) return "🏳️";
+  const regionalIndicatorA = 127462;
+  return String.fromCodePoint(
+    regionalIndicatorA + iso2.charCodeAt(0) - 65,
+    regionalIndicatorA + iso2.charCodeAt(1) - 65,
+  );
+}
+
+export function toRad(degrees) {
+  return degrees * Math.PI / 180;
+}
+
+export function toDeg(radians) {
+  return radians * 180 / Math.PI;
+}
+
+export function haversineKm(a, b) {
+  const deltaLat = toRad(b[1] - a[1]);
+  const deltaLon = toRad(b[0] - a[0]);
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const value = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+  return 12742 * Math.asin(Math.min(1, Math.sqrt(value)));
+}
+
+export function bearing(a, b) {
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const deltaLon = toRad(b[0] - a[0]);
+  const y = Math.sin(deltaLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2)
+    - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+export function compassArrow(degrees) {
+  return `<svg class="icon compass-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${Math.round(degrees)}deg)"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg>`;
+}
+
+export function proximityPct(km) {
+  return Math.max(0, Math.round(100 - km / MAX_DIST_KM * 100));
+}
+
+export function attachAutocomplete(input, dropdown, candidatesFn, onPick) {
+  const controller = new AbortController();
+  const { signal } = controller;
+  let items = [];
+  let activeIndex = -1;
+
+  function hide() {
+    dropdown.style.display = "none";
+    dropdown.innerHTML = "";
+  }
+
+  function pick(name) {
+    input.value = name;
+    items = [];
+    activeIndex = -1;
+    hide();
+    onPick(name);
+  }
+
+  function render() {
+    if (!items.length) {
+      hide();
+      return;
+    }
+    dropdown.replaceChildren(...items.map((name, index) => {
+      const option = document.createElement("div");
+      option.dataset.i = String(index);
+      option.className = index === activeIndex ? "active" : "";
+      option.textContent = name;
+      option.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        pick(name);
+      }, { signal });
+      return option;
+    }));
+    dropdown.style.display = "block";
+  }
+
+  input.addEventListener("input", () => {
+    const query = input.value.trim();
+    items = query ? candidatesFn(query).slice(0, 8) : [];
+    activeIndex = -1;
+    render();
+  }, { signal });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      activeIndex = Math.min(items.length - 1, activeIndex + 1);
+      render();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      activeIndex = Math.max(0, activeIndex - 1);
+      render();
+    } else if (event.key === "Enter" && activeIndex >= 0 && items[activeIndex]) {
+      event.preventDefault();
+      pick(items[activeIndex]);
+    } else if (event.key === "Escape") {
+      items = [];
+      hide();
+    }
+  }, { signal });
+
+  document.addEventListener("click", (event) => {
+    if (event.target !== input && !dropdown.contains(event.target)) hide();
+  }, { signal });
+
+  const observer = new MutationObserver(() => {
+    if (input.isConnected) return;
+    observer.disconnect();
+    controller.abort();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  signal.addEventListener("abort", () => observer.disconnect(), { once: true });
+
+  return () => controller.abort();
+}
+
+export { escapeHtml };
 
 const ICONS = {
   chevronLeft: '<polyline points="15 5 8 12 15 19"/>',
@@ -58,10 +211,6 @@ export function icon(name, opts = {}) {
   return `<svg class="icon${sizeClass}${extra}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
 
-// ---------- Gedeelde speler-kleuren ----------
-// Eén samenhangende set (gebaseerd op de accentkleur, variërend in tint/
-// helderheid) i.p.v. de willekeurige "snoep"-kleuren die eerder verspreid
-// stonden over geoguesser.js en profile.js.
 export const PLAYER_COLORS = [
   "#7c5cff", "#5c8fff", "#22c1a4", "#e07a5f",
   "#c77dff", "#4f9dde",
