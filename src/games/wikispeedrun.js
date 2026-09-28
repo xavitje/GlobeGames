@@ -1,6 +1,8 @@
-import { topbar, icon } from "../core.js";
+import { icon } from "../core.js";
+import { topbar } from "../lib/layout.js";
 import { hasMultiplayerConfig, GameRoom, randomRoomCode, randomPlayerId } from "../lib/multiplayer.js";
 import { getProfile, saveProfile } from "../lib/profile.js";
+import { getLanguage, pick } from "../lib/i18n.js";
 
 let app;
 let ws = null; // WikiSpeedrun state
@@ -20,7 +22,7 @@ async function fetchWikiRandom() {
   const res = await fetch(url);
   const data = await res.json();
   const titles = (data.query?.random || []).map((r) => r.title);
-  if (!titles.length) throw new Error("Geen willekeurig artikel gevonden");
+  if (!titles.length) throw new Error(pick("No random article found", "Geen willekeurig artikel gevonden"));
   if (titles.length === 1) return titles[0];
 
   try {
@@ -59,7 +61,7 @@ async function fetchWikiIntro(title) {
   const res = await fetch(url);
   const data = await res.json();
   const page = Object.values(data.query?.pages || {})[0];
-  if (!page || page.missing !== undefined) throw new Error("Artikel niet gevonden");
+  if (!page || page.missing !== undefined) throw new Error(pick("Article not found", "Artikel niet gevonden"));
   return (page.extract || "").trim();
 }
 
@@ -118,7 +120,7 @@ function truncateIntro(text, max) {
 async function showLinkPreview(a, title) {
   const myToken = ++wsPreviewToken;
   const el = ensureLinkPreviewEl();
-  el.innerHTML = `<div class="ws-link-preview-title">${title}</div><div class="ws-link-preview-body">Laden...</div>`;
+  el.innerHTML = `<div class="ws-link-preview-title">${title}</div><div class="ws-link-preview-body">${pick("Loading…", "Laden…")}</div>`;
   el.classList.add("ws-visible");
   positionLinkPreview(el, a.getBoundingClientRect());
 
@@ -134,7 +136,7 @@ async function showLinkPreview(a, title) {
   if (myToken !== wsPreviewToken) return; // muis is inmiddels ergens anders
 
   const body = el.querySelector(".ws-link-preview-body");
-  if (body) body.textContent = text ? truncateIntro(text, 420) : "Geen samenvatting beschikbaar.";
+  if (body) body.textContent = text ? truncateIntro(text, 420) : pick("No summary available.", "Geen samenvatting beschikbaar.");
   positionLinkPreview(el, a.getBoundingClientRect());
 }
 
@@ -250,6 +252,10 @@ function teardown() {
   document.getElementById("wsLinkPreview")?.remove();
   window.removeEventListener("popstate", handleExternalNavigate);
 }
+
+export function cleanupWikiSpeedrun() {
+  teardown();
+}
 function handleExternalNavigate() {
   if (!location.pathname.startsWith("/wikispeedrun")) teardown();
 }
@@ -271,7 +277,7 @@ export function renderWikiSpeedrun(container, routeSegments = []) {
     players: [],
     gameState: "menu",
     clicks: 0,
-    lang: "nl",
+    lang: getLanguage(),
     startTime: null,
     endTime: null,
     history: [],
@@ -292,17 +298,18 @@ function showMenu() {
   const mpAvailable = hasMultiplayerConfig();
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("bookOpen", { size: "sm" })} WikiSpeedrun</h2><div class="desc">Race van het startartikel naar het eindartikel, enkel via links.</div></div></div>
-    <div class="card" style="cursor:pointer;" onclick="wsShowSoloSetup()">
+    <div class="gametitle"><div><h2>${icon("bookOpen", { size: "sm" })} WikiSpeedrun</h2><div class="desc">${pick("Race from the start article to the target using links only.", "Race van het startartikel naar het eindartikel, enkel via links.")}</div></div></div>
+    <div class="game-mode-grid">
+    <button type="button" class="card game-mode-card" onclick="wsShowSoloSetup()">
       ${icon("flag", { size: "lg" })}
-      <h3>Solo spelen</h3>
-      <p>Kies of loot een start- en eindartikel en race in je eentje tegen de klok.</p>
-    </div>
-    <div class="card" style="cursor:${mpAvailable ? "pointer" : "default"}; opacity:${mpAvailable ? "1" : "0.55"}; margin-top:12px;" ${mpAvailable ? 'onclick="wsShowMultiplayerMenu()"' : ""}>
+      <h3>${pick("Play solo", "Solo spelen")}</h3>
+      <p>${pick("Choose or draw two articles and race against the clock.", "Kies of loot een start- en eindartikel en race in je eentje tegen de klok.")}</p>
+    </button>
+    <button type="button" class="card game-mode-card" ${mpAvailable ? 'onclick="wsShowMultiplayerMenu()"' : "disabled"}>
       ${icon("users", { size: "lg" })}
       <h3>Multiplayer</h3>
-      <p>${mpAvailable ? "Race tegelijk met vrienden in dezelfde lobby." : "Multiplayer is niet geconfigureerd."}</p>
-    </div>`;
+      <p>${mpAvailable ? pick("Race your friends in the same lobby.", "Race tegelijk met vrienden in dezelfde lobby.") : pick("Multiplayer is not configured yet.", "Multiplayer is nog niet ingesteld.")}</p>
+    </button></div>`;
 }
 window.wsShowMenu = showMenu;
 
@@ -312,19 +319,19 @@ window.wsShowSoloSetup = function () {
   ws.gameState = "soloSetup";
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("flag", { size: "sm" })} Solo instellen</h2><div class="desc">Kies een start- en eindartikel.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("flag", { size: "sm" })} ${pick("Solo setup", "Solo instellen")}</h2><div class="desc">${pick("Choose a start and target article.", "Kies een start- en eindartikel.")}</div></div></div>
     <div class="card" style="cursor:default; overflow:visible;">
-      <label class="gg-label">Taal</label>
+      <label class="gg-label">${pick("Wikipedia language", "Wikipedia-taal")}</label>
       <select id="wsLangSelect" onchange="wsSetLang(this.value)" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
+        <option value="en" ${ws.lang === "en" ? "selected" : ""}>English</option>
         <option value="nl" ${ws.lang === "nl" ? "selected" : ""}>Nederlands</option>
-        <option value="en" ${ws.lang === "en" ? "selected" : ""}>Engels</option>
       </select>
-      ${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}
-      ${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}
+      ${articleFieldHtml("wsStartPage", pick("Start article", "Startartikel"), ws.startPage)}
+      ${articleFieldHtml("wsEndPage", pick("Target article", "Eindartikel"), ws.endPage)}
       <div id="wsSoloError" class="small" style="color:var(--danger); margin-top:10px; display:none;"></div>
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
+      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
       <button class="btn primary" onclick="wsStartSolo()">Start ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   attachWikiAutocomplete("wsStartPage", (v) => { ws.startPage = v; updateSetupPreview("wsStartPage", v); });
@@ -362,8 +369,8 @@ window.wsStartSolo = async function () {
   const end = (document.getElementById("wsEndPage")?.value || "").trim();
   const errEl = document.getElementById("wsSoloError");
   const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
-  if (!start || !end) return showError("Kies eerst een start- en eindartikel.");
-  if (start.toLowerCase() === end.toLowerCase()) return showError("Start- en eindartikel moeten verschillend zijn.");
+  if (!start || !end) return showError(pick("Choose both a start and target article.", "Kies eerst een start- en eindartikel."));
+  if (start.toLowerCase() === end.toLowerCase()) return showError(pick("Start and target article must be different.", "Start- en eindartikel moeten verschillend zijn."));
 
   ws.startPage = await resolveWikiTitle(start);
   ws.endPage = await resolveWikiTitle(end);
@@ -377,9 +384,9 @@ function articleFieldHtml(id, label, value) {
   return `
     <label class="gg-label" ${id === "wsEndPage" ? 'style="margin-top:16px;"' : ""}>${label}</label>
     <div style="display:flex; gap:8px; position:relative;">
-      <input id="${id}" type="text" autocomplete="off" placeholder="Zoek of typ een titel..." value="${value || ""}"
+      <input id="${id}" type="text" autocomplete="off" placeholder="${pick("Search or enter a title…", "Zoek of typ een titel…")}" value="${value || ""}"
         style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
-      <button class="btn" onclick="wsSetRandom('${id}')" title="Willekeurig artikel">${icon("shuffle", { size: "sm" })} Willekeurig</button>
+      <button class="btn" onclick="wsSetRandom('${id}')" title="${pick("Random article", "Willekeurig artikel")}">${icon("shuffle", { size: "sm" })} ${pick("Random", "Willekeurig")}</button>
     </div>
     <div id="${id}Preview" class="ws-setup-preview" style="display:none;"></div>`;
 }
@@ -393,17 +400,17 @@ async function updateSetupPreview(id, title) {
     return;
   }
   previewEl.style.display = "flex";
-  previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">Laden...</div>`;
+  previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">${pick("Loading…", "Laden…")}</div>`;
   const info = await fetchWikiPreviewInfo(title);
   if (!info) {
-    previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">Geen info gevonden.</div>`;
+    previewEl.innerHTML = `<div style="padding:10px; color:var(--sub); font-size:13px;">${pick("No information found.", "Geen info gevonden.")}</div>`;
     return;
   }
   previewEl.innerHTML = `
     ${info.thumbnail ? `<img src="${info.thumbnail}" alt="${title}" />` : ""}
     <div class="ws-setup-preview-text">
       <strong>${title}</strong>
-      <p>${truncateIntro(info.extract, 150) || "Geen samenvatting."}</p>
+      <p>${truncateIntro(info.extract, 150) || pick("No summary.", "Geen samenvatting.")}</p>
     </div>
   `;
 }
@@ -413,7 +420,7 @@ window.wsSetRandom = async function (inputId) {
   if (!input) return;
   const prev = input.value;
   input.disabled = true;
-  input.value = "Zoeken...";
+  input.value = pick("Searching…", "Zoeken…");
   try {
     const title = await fetchWikiRandom();
     input.value = title;
@@ -422,7 +429,7 @@ window.wsSetRandom = async function (inputId) {
     if (ws.isHost) scheduleSync();
   } catch (e) {
     input.value = prev;
-    wsToast("Kon geen willekeurig artikel ophalen.");
+    wsToast(pick("Could not load a random article.", "Kon geen willekeurig artikel ophalen."));
   }
   input.disabled = false;
 };
@@ -434,42 +441,42 @@ window.wsShowMultiplayerMenu = function () {
   ws.gameState = "mpMenu";
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} WikiSpeedrun multiplayer</h2><div class="desc">Race tegelijk met vrienden.</div></div></div>
-    <div class="card" style="cursor:pointer;" onclick="wsShowHostSetup()">
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} WikiSpeedrun multiplayer</h2><div class="desc">${pick("Race your friends in real time.", "Race tegelijk met vrienden.")}</div></div></div>
+    <div class="game-mode-grid"><button type="button" class="card game-mode-card" onclick="wsShowHostSetup()">
       ${icon("plus", { size: "lg" })}
-      <h3>Lobby hosten</h3>
-      <p>Maak een lobby aan en kies straks samen het start- en eindartikel.</p>
-    </div>
-    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="wsShowJoinSetup()">
+      <h3>${pick("Host a lobby", "Lobby hosten")}</h3>
+      <p>${pick("Create a lobby and choose the start and target together.", "Maak een lobby aan en kies straks samen het start- en eindartikel.")}</p>
+    </button>
+    <button type="button" class="card game-mode-card" onclick="wsShowJoinSetup()">
       ${icon("key", { size: "lg" })}
-      <h3>Lobby joinen</h3>
-      <p>Heb je een code van een vriend gekregen? Vul 'm hier in.</p>
-    </div>
+      <h3>${pick("Join a lobby", "Lobby joinen")}</h3>
+      <p>${pick("Enter the code you received from a friend.", "Vul hier de code in die je van een vriend kreeg.")}</p>
+    </button></div>
     <div class="footerrow">
-      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button><div></div>
+      <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
     </div>`;
 };
 
 function nameFieldHtml() {
   return `
-    <label class="gg-label">Jouw naam</label>
-    <input id="wsNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${ws.name || ""}"
+    <label class="gg-label">${pick("Your name", "Jouw naam")}</label>
+    <input id="wsNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${ws.name || ""}"
       style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />`;
 }
 
 window.wsShowHostSetup = function () {
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} Lobby hosten</h2><div class="desc">Kies je naam en maak de lobby aan.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} ${pick("Host a lobby", "Lobby hosten")}</h2><div class="desc">${pick("Choose your name and create the lobby.", "Kies je naam en maak de lobby aan.")}</div></div></div>
     <div class="card" style="cursor:default;">${nameFieldHtml()}</div>
     <div class="footerrow">
       <button class="btn" onclick="wsShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="wsHostLobby()">Kamer aanmaken ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn primary" onclick="wsHostLobby()">${pick("Create room", "Kamer aanmaken")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 };
 
 window.wsHostLobby = function () {
-  const name = (document.getElementById("wsNameInput")?.value || "").trim() || "Speler";
+  const name = (document.getElementById("wsNameInput")?.value || "").trim() || pick("Player", "Speler");
   saveProfile({ ...getProfile(), name });
   ws.name = name;
   ws.isHost = true;
@@ -479,23 +486,23 @@ window.wsHostLobby = function () {
 window.wsShowJoinSetup = function () {
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} Lobby joinen</h2><div class="desc">Vul je naam en de lobby-code in.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} ${pick("Join a lobby", "Lobby joinen")}</h2><div class="desc">${pick("Enter your name and lobby code.", "Vul je naam en de lobby-code in.")}</div></div></div>
     <div class="card" style="cursor:default;">
       ${nameFieldHtml()}
-      <label class="gg-label" style="margin-top:16px;">Lobby-code</label>
+      <label class="gg-label" style="margin-top:16px;">${pick("Lobby code", "Lobby-code")}</label>
       <input id="wsCodeInput" type="text" placeholder="bv. LFFW" maxlength="6"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; text-transform:uppercase;" />
     </div>
     <div class="footerrow">
       <button class="btn" onclick="wsShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="wsSubmitJoin()">Join ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn primary" onclick="wsSubmitJoin()">${pick("Join", "Meedoen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 };
 
 window.wsSubmitJoin = function () {
-  const name = (document.getElementById("wsNameInput")?.value || "").trim() || "Speler";
+  const name = (document.getElementById("wsNameInput")?.value || "").trim() || pick("Player", "Speler");
   const code = (document.getElementById("wsCodeInput")?.value || "").trim().toUpperCase();
-  if (!code) return wsToast("Vul een lobby-code in.");
+  if (!code) return wsToast(pick("Enter a lobby code.", "Vul een lobby-code in."));
   saveProfile({ ...getProfile(), name });
   ws.name = name;
   ws.isHost = false;
@@ -508,15 +515,15 @@ function joinByCode(code) {
   ws.gameState = "autoJoin";
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby joinen</h2><div class="desc">Je bent uitgenodigd voor lobby <strong>${code}</strong>.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} ${pick("Join a lobby", "Lobby joinen")}</h2><div class="desc">${pick("You were invited to lobby", "Je bent uitgenodigd voor lobby")} <strong>${code}</strong>.</div></div></div>
     <div class="card" style="cursor:default;">${nameFieldHtml()}</div>
     <div class="footerrow">
       <button class="btn" onclick="wsShowMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="wsAutoJoin('${code}')">Joinen ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn primary" onclick="wsAutoJoin('${code}')">${pick("Join", "Joinen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 }
 window.wsAutoJoin = function (code) {
-  const name = (document.getElementById("wsNameInput")?.value || "").trim() || "Speler";
+  const name = (document.getElementById("wsNameInput")?.value || "").trim() || pick("Player", "Speler");
   saveProfile({ ...getProfile(), name });
   ws.name = name;
   ws.isHost = false;
@@ -529,7 +536,7 @@ async function enterLobby(code) {
   code = code.toUpperCase();
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${code}</h2><div class="desc">Verbinden...</div></div></div>`;
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${code}</h2><div class="desc">${pick("Connecting…", "Verbinden…")}</div></div></div>`;
 
   // Belangrijkste fix in dit bestand: de room werd voorheen nooit echt
   // verbonden (geen connect()-aanroep), en de naam werd als een object
@@ -543,9 +550,9 @@ async function enterLobby(code) {
       ${topbar()}
       <div class="card" style="cursor:default; text-align:center;">
         ${icon("warning", { size: "xl" })}
-        <h3>Kon niet verbinden</h3>
-        <p>${e.message || "Onbekende fout."}</p>
-        <button class="btn primary" onclick="wsShowMultiplayerMenu()" style="margin-top:10px;">Terug</button>
+        <h3>${pick("Could not connect", "Kon niet verbinden")}</h3>
+        <p>${e.message || pick("Unknown error.", "Onbekende fout.")}</p>
+        <button class="btn primary" onclick="wsShowMultiplayerMenu()" style="margin-top:10px;">${pick("Back", "Terug")}</button>
       </div>`;
     return;
   }
@@ -587,30 +594,30 @@ function drawLobby() {
   const shareUrl = `${location.origin}/wikispeedrun/${ws.room.code}`;
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${ws.room.code}</h2><div class="desc">${ws.isHost ? "Deel de link met je vrienden." : "Wachten tot de host het spel start..."}</div></div></div>
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${ws.room.code}</h2><div class="desc">${ws.isHost ? pick("Share the link with your friends.", "Deel de link met je vrienden.") : pick("Waiting for the host to start…", "Wachten tot de host het spel start…")}</div></div></div>
     <div class="card" style="cursor:default; text-align:center;">
-      <div class="small">Lobby-code</div>
+      <div class="small">${pick("Lobby code", "Lobby-code")}</div>
       <h3 style="font-size:32px; letter-spacing:6px; margin:6px 0;">${ws.room.code}</h3>
       <div class="gg-share-row">
         <input class="gg-share-input" id="wsShareUrl" value="${shareUrl}" readonly />
-        <button class="btn" onclick="wsCopyLink()">${icon("clipboard", { size: "sm" })} Kopieer</button>
+        <button class="btn" onclick="wsCopyLink()">${icon("clipboard", { size: "sm" })} ${pick("Copy", "Kopieer")}</button>
       </div>
     </div>
     <div class="card" style="cursor:default; margin-top:12px; overflow:visible;">
       <h3 style="margin-bottom:10px;">${icon("flag", { size: "sm" })} Route</h3>
       ${ws.isHost
-        ? `<label class="gg-label">Taal</label>
+        ? `<label class="gg-label">${pick("Language", "Taal")}</label>
            <select id="wsLangSelect" onchange="wsSetLang(this.value)" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px; margin-bottom:16px;">
+             <option value="en" ${ws.lang === "en" ? "selected" : ""}>English</option>
              <option value="nl" ${ws.lang === "nl" ? "selected" : ""}>Nederlands</option>
-             <option value="en" ${ws.lang === "en" ? "selected" : ""}>Engels</option>
            </select>
-           ${articleFieldHtml("wsStartPage", "Start artikel", ws.startPage)}${articleFieldHtml("wsEndPage", "Eind artikel", ws.endPage)}`
-        : `<p id="wsGuestRoute" class="small">Taal: <strong>${ws.lang === "en" ? "Engels" : "Nederlands"}</strong><br>Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong></p>`}
+           ${articleFieldHtml("wsStartPage", pick("Start article", "Startartikel"), ws.startPage)}${articleFieldHtml("wsEndPage", pick("Target article", "Eindartikel"), ws.endPage)}`
+        : `<p id="wsGuestRoute" class="small">${pick("Language", "Taal")}: <strong>${ws.lang === "en" ? "English" : "Nederlands"}</strong><br>${pick("Start", "Start")}: <strong>${ws.startPage || "..."}</strong><br>${pick("Target", "Eind")}: <strong>${ws.endPage || "..."}</strong></p>`}
     </div>
     <div class="guesslist" style="margin-top:14px;" id="wsPlayerList"></div>
     <div class="footerrow">
-      <button class="btn" onclick="wsLeaveLobby()">${icon("chevronLeft", { size: "sm" })} Lobby verlaten</button>
-      ${ws.isHost ? `<button class="btn primary" onclick="wsStartGame()">Start spel ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
+      <button class="btn" onclick="wsLeaveLobby()">${icon("chevronLeft", { size: "sm" })} ${pick("Leave lobby", "Lobby verlaten")}</button>
+      ${ws.isHost ? `<button class="btn primary" onclick="wsStartGame()">${pick("Start game", "Start spel")} ${icon("chevronRight", { size: "sm" })}</button>` : "<div></div>"}
     </div>`;
 
   if (ws.isHost) {
@@ -624,7 +631,7 @@ function drawLobby() {
 
 function updateGuestRouteView() {
   const el = document.getElementById("wsGuestRoute");
-  if (el) el.innerHTML = `Taal: <strong>${ws.lang === "en" ? "Engels" : "Nederlands"}</strong><br>Start: <strong>${ws.startPage || "..."}</strong><br>Eind: <strong>${ws.endPage || "..."}</strong>`;
+  if (el) el.innerHTML = `${pick("Language", "Taal")}: <strong>${ws.lang === "en" ? "English" : "Nederlands"}</strong><br>${pick("Start", "Start")}: <strong>${ws.startPage || "..."}</strong><br>${pick("Target", "Eind")}: <strong>${ws.endPage || "..."}</strong>`;
 }
 
 window.wsCopyLink = function () {
@@ -633,8 +640,8 @@ window.wsCopyLink = function () {
   navigator.clipboard.writeText(input.value).catch(() => { input.select(); document.execCommand("copy"); });
   const btn = input.nextElementSibling;
   if (btn) {
-    btn.innerHTML = `${icon("check", { size: "sm" })} Gekopieerd!`;
-    setTimeout(() => { btn.innerHTML = `${icon("clipboard", { size: "sm" })} Kopieer`; }, 2000);
+    btn.innerHTML = `${icon("check", { size: "sm" })} ${pick("Copied!", "Gekopieerd!")}`;
+    setTimeout(() => { btn.innerHTML = `${icon("clipboard", { size: "sm" })} ${pick("Copy", "Kopieer")}`; }, 2000);
   }
 };
 
@@ -651,8 +658,8 @@ window.wsStartGame = async function () {
   // altijd als "leeg" gezien.
   let start = (document.getElementById("wsStartPage")?.value || ws.startPage || "").trim();
   let end = (document.getElementById("wsEndPage")?.value || ws.endPage || "").trim();
-  if (!start || !end) return wsToast("Kies eerst een start- en eindartikel.");
-  if (start.toLowerCase() === end.toLowerCase()) return wsToast("Start en eind moeten verschillend zijn.");
+  if (!start || !end) return wsToast(pick("Choose a start and target article.", "Kies eerst een start- en eindartikel."));
+  if (start.toLowerCase() === end.toLowerCase()) return wsToast(pick("Start and target must be different.", "Start en eind moeten verschillend zijn."));
   
   start = await resolveWikiTitle(start);
   end = await resolveWikiTitle(end);
@@ -667,7 +674,7 @@ function renderPlayerList() {
   if (!list) return;
   list.innerHTML = ws.players.map((p) => `
     <div class="gitem">
-      <div class="name">${icon("user", { size: "sm" })} ${p.name || "Speler"}${p.playerId === ws.playerId ? " (jij)" : ""}</div>
+      <div class="name">${icon("user", { size: "sm" })} ${p.name || pick("Player", "Speler")}${p.playerId === ws.playerId ? pick(" (you)", " (jij)") : ""}</div>
       <div></div><div></div><div></div>
     </div>`).join("");
 }
@@ -689,7 +696,7 @@ async function startRun() {
       p.finished = false;
       p.finalClicks = null;
       p.finalTime = null;
-      p.progress = "Startpagina...";
+      p.progress = pick("Start page…", "Startpagina…");
       p.progressClicks = 0;
     });
   }
@@ -698,34 +705,34 @@ async function startRun() {
     <div class="ws-run-header" id="wsHeader">
       <div class="ws-run-info">
         <div class="ws-info-wrap">
-          Doel: <strong>${ws.endPage}</strong>
-          <span class="ws-info-icon" id="wsGoalInfoIcon" tabindex="0" title="Bekijk doel">${icon("info", { size: "sm" })}</span>
+          ${pick("Target", "Doel")}: <strong>${ws.endPage}</strong>
+          <span class="ws-info-icon" id="wsGoalInfoIcon" tabindex="0" title="${pick("View target", "Bekijk doel")}">${icon("info", { size: "sm" })}</span>
           <div class="ws-info-popover">
             <div class="ws-info-popover-title">${ws.endPage}</div>
-            <div id="wsGoalInfoBody">Laden...</div>
+            <div id="wsGoalInfoBody">${pick("Loading…", "Laden…")}</div>
           </div>
         </div>
-        <div class="small">Vanaf: ${ws.startPage}</div>
+        <div class="small">${pick("From", "Vanaf")}: ${ws.startPage}</div>
       </div>
       <div class="ws-run-timer" id="wsTimer">00:00</div>
       <div class="ws-run-clicks" style="display:flex; align-items:center; gap:12px;">
         <div>Clicks: <strong id="wsClicks">0</strong></div>
-        <button class="btn small" onclick="wsGiveUp()">${icon("flag", { size: "sm" })} Geef op</button>
+        <button class="btn small" onclick="wsGiveUp()">${icon("flag", { size: "sm" })} ${pick("Give up", "Geef op")}</button>
       </div>
     </div>
     <div class="ws-trail-bar" id="wsTrailBar"></div>
     ${ws.room ? `
     <div class="ws-sidebar" id="wsSidebar">
-      <h3>${icon("users", { size: "sm" })} Spelers</h3>
+      <h3>${icon("users", { size: "sm" })} ${pick("Players", "Spelers")}</h3>
       <div id="wsPlayerProgress"></div>
     </div>` : ""}
     <div class="ws-wiki-wrap ${ws.room ? "ws-with-sidebar" : ""}" id="wsWikiContainer">
-      <h2 style="text-align:center; margin-top:50px;">Artikel laden...</h2>
+      <h2 style="text-align:center; margin-top:50px;">${pick("Loading article…", "Artikel laden…")}</h2>
     </div>
     <div class="ws-drawer" id="wsGoalDrawer">
       <div class="ws-drawer-close" id="wsGoalDrawerClose">${icon("close")}</div>
-      <h3>Doel: ${ws.endPage}</h3>
-      <div id="wsGoalDrawerBody">Laden...</div>
+      <h3>${pick("Target", "Doel")}: ${ws.endPage}</h3>
+      <div id="wsGoalDrawerBody">${pick("Loading…", "Laden…")}</div>
     </div>`;
 
   const infoIcon = document.getElementById("wsGoalInfoIcon");
@@ -751,24 +758,24 @@ async function startRun() {
   const antiCheat = (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
-      wsToast("Zoeken (Ctrl+F) is geblokkeerd tijdens de Speedrun!");
+      wsToast(pick("Search (Ctrl+F) is disabled during the Speedrun!", "Zoeken (Ctrl+F) is geblokkeerd tijdens de Speedrun!"));
     }
     if (e.key === "F12") {
       e.preventDefault();
-      wsToast("Inspecteren is geblokkeerd!");
+      wsToast(pick("Developer tools are disabled!", "Inspecteren is geblokkeerd!"));
     }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && ["i", "j", "c"].includes(e.key.toLowerCase())) {
       e.preventDefault();
-      wsToast("Inspecteren is geblokkeerd!");
+      wsToast(pick("Developer tools are disabled!", "Inspecteren is geblokkeerd!"));
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
       e.preventDefault();
-      wsToast("Broncode bekijken is geblokkeerd!");
+      wsToast(pick("Viewing source is disabled!", "Broncode bekijken is geblokkeerd!"));
     }
   };
   const antiContextMenu = (e) => {
     e.preventDefault();
-    wsToast("Rechtermuisknop is geblokkeerd!");
+    wsToast(pick("Right-click is disabled!", "Rechtermuisknop is geblokkeerd!"));
   };
   let wikiContentNode = null;
   const antiCheatBlur = () => {
@@ -781,7 +788,7 @@ async function startRun() {
       const warning = document.createElement("h2");
       warning.id = "wsCheatWarning";
       warning.style.cssText = "text-align:center; margin-top:50px; color:var(--danger);";
-      warning.textContent = "Pagina verborgen om spieken te voorkomen 👀. Klik hier om verder te gaan.";
+      warning.textContent = pick("Page hidden to prevent cheating 👀. Click here to continue.", "Pagina verborgen om spieken te voorkomen 👀. Klik hier om verder te gaan.");
       container.appendChild(warning);
     }
   };
@@ -816,20 +823,20 @@ async function startRun() {
 // hover-info — los van loadArticle() zodat dit niet de eigenlijke race
 // vertraagt en gewoon op de achtergrond kan bijladen.
 async function loadGoalIntro() {
-  let htmlDrawer = "Geen samenvatting beschikbaar.";
-  let htmlPopover = "Geen samenvatting beschikbaar.";
+  let htmlDrawer = pick("No summary available.", "Geen samenvatting beschikbaar.");
+  let htmlPopover = pick("No summary available.", "Geen samenvatting beschikbaar.");
   try {
     const info = await fetchWikiPreviewInfo(ws.endPage);
     if (info) {
       htmlDrawer = `
         ${info.thumbnail ? `<img src="${info.thumbnail}" alt="${ws.endPage}" />` : ""}
-        <p>${info.extract || "Geen samenvatting."}</p>
+        <p>${info.extract || pick("No summary.", "Geen samenvatting.")}</p>
       `;
-      htmlPopover = truncateIntro(info.extract, 420) || "Geen samenvatting.";
+      htmlPopover = truncateIntro(info.extract, 420) || pick("No summary.", "Geen samenvatting.");
     }
   } catch (e) {
-    htmlDrawer = "Kon geen samenvatting laden.";
-    htmlPopover = "Kon geen samenvatting laden.";
+    htmlDrawer = pick("Could not load a summary.", "Kon geen samenvatting laden.");
+    htmlPopover = pick("Could not load a summary.", "Kon geen samenvatting laden.");
   }
   
   const elDrawer = document.getElementById("wsGoalDrawerBody");
@@ -898,7 +905,7 @@ function buildTableOfContents(bodyEl) {
 
   const tocEl = document.createElement("div");
   tocEl.className = "toc";
-  tocEl.innerHTML = `<div class="toctitle">Inhoud</div><ul>${sections.map(renderItem).join("")}</ul>`;
+  tocEl.innerHTML = `<div class="toctitle">${pick("Contents", "Inhoud")}</div><ul>${sections.map(renderItem).join("")}</ul>`;
   headings[0].insertAdjacentElement("beforebegin", tocEl);
 }
 
@@ -918,7 +925,7 @@ async function loadArticle(title) {
   const container = document.getElementById("wsWikiContainer");
   if (!container) return;
 
-  container.innerHTML = `<h2 style="text-align:center; margin-top:50px;">Laden van <em>${title}</em>...</h2>`;
+  container.innerHTML = `<h2 style="text-align:center; margin-top:50px;">${pick("Loading", "Laden van")} <em>${title}</em>…</h2>`;
   window.scrollTo(0, 0);
 
   try {
@@ -1000,9 +1007,9 @@ async function loadArticle(title) {
     const prevTitle = ws.history.length > 1 ? ws.history[ws.history.length - 2] : null;
     container.innerHTML = `
       <div style="text-align:center; margin-top:50px;">
-        <h2 style="color:var(--danger);">Fout bij laden van artikel: ${title}</h2>
+        <h2 style="color:var(--danger);">${pick("Error loading article", "Fout bij laden van artikel")}: ${title}</h2>
         <p style="color:var(--text-dim); margin-bottom:16px;">${e.message || String(e)}</p>
-        ${prevTitle ? `<button class="btn" onclick="wsHandleLinkClick(event, '${prevTitle}')">${icon("chevronLeft", { size: "sm" })} Terug</button>` : ""}
+        ${prevTitle ? `<button class="btn" onclick="wsHandleLinkClick(event, '${prevTitle}')">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>` : ""}
       </div>`;
   }
 }
@@ -1020,10 +1027,10 @@ function winGame(finalTitle) {
     container.innerHTML = `
       <div class="ws-finish-card">
         ${icon("flag", { size: "xl" })}
-        <h1>Gehaald!</h1>
-        <p>Je hebt <strong>${ws.endPage}</strong> bereikt in <strong>${ws.clicks}</strong> clicks!</p>
-        <p class="small">Tijd: ${(timeMs / 1000).toFixed(1)} seconden</p>
-        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} Terug naar ${ws.room ? 'lobby' : 'menu'}</button>
+        <h1>${pick("Finished!", "Gehaald!")}</h1>
+        <p>${pick("You reached", "Je hebt")} <strong>${ws.endPage}</strong> ${pick("in", "bereikt in")} <strong>${ws.clicks}</strong> clicks!</p>
+        <p class="small">${pick("Time", "Tijd")}: ${(timeMs / 1000).toFixed(1)} ${pick("seconds", "seconden")}</p>
+        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back to", "Terug naar")} ${ws.room ? 'lobby' : 'menu'}</button>
       </div>`;
   }
 }
@@ -1039,22 +1046,22 @@ window.wsBackToMenu = function () {
 };
 
 window.wsGiveUp = function () {
-  if (!confirm("Weet je zeker dat je wilt opgeven?")) return;
+  if (!confirm(pick("Are you sure you want to give up?", "Weet je zeker dat je wilt opgeven?"))) return;
   
   ws.endTime = Date.now();
   ws.gameState = "finished";
   if (ws.cleanupCheat) ws.cleanupCheat();
 
-  if (ws.room) ws.room.send("progress", { clicks: ws.clicks, current: "Opgegeven ❌" });
+  if (ws.room) ws.room.send("progress", { clicks: ws.clicks, current: pick("Gave up ❌", "Opgegeven ❌") });
 
   const container = document.getElementById("wsWikiContainer");
   if (container) {
     container.innerHTML = `
       <div class="ws-finish-card">
         ${icon("warning", { size: "xl" })}
-        <h1>Opgegeven</h1>
-        <p>Je hebt de handdoek in de ring gegooid na <strong>${ws.clicks}</strong> clicks.</p>
-        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} Terug naar ${ws.room ? 'lobby' : 'menu'}</button>
+        <h1>${pick("Gave up", "Opgegeven")}</h1>
+        <p>${pick("You gave up after", "Je hebt de handdoek in de ring gegooid na")} <strong>${ws.clicks}</strong> clicks.</p>
+        <button class="btn primary" onclick="wsBackToMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back to", "Terug naar")} ${ws.room ? 'lobby' : 'menu'}</button>
       </div>`;
   }
 };
@@ -1092,7 +1099,7 @@ function renderScoreboard(msgPayload, type) {
 
   board.innerHTML = sorted.map((p) => `
     <div class="ws-sidebar-player ${p.finished ? "ws-finished" : ""}">
-      <strong>${p.name || "Speler"}</strong>
-      <div class="small">${p.finished ? `Klaar! (${p.finalClicks} clicks)` : (p.progress ? `${p.progress} (${p.progressClicks} clicks)` : "Startpagina...")}</div>
+      <strong>${p.name || pick("Player", "Speler")}</strong>
+      <div class="small">${p.finished ? `${pick("Finished!", "Klaar!")} (${p.finalClicks} clicks)` : (p.progress ? `${p.progress} (${p.progressClicks} clicks)` : pick("Start page…", "Startpagina…"))}</div>
     </div>`).join("");
 }

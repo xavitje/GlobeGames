@@ -1,1 +1,82 @@
-import{geoMercator,geoPath,geoCentroid}from"d3-geo";import{COUNTRY_DATA}from"../data/countries.js";import{ALL_NAMES,loadWorld,loadWorldHD,worldByName,shapeFeatureFor,flagEmoji,findCountryByLoose,attachAutocomplete,candidateNames,haversineKm,bearing,compassArrow,proximityPct,topbar,icon}from"../core.js";import{adSlotHtml,initAdSlots}from"../lib/ads.js";const SIL_DIFFICULTIES=[{key:"makkelijk",label:"Makkelijk",maxGuesses:Infinity,hints:!0},{key:"normaal",label:"Normaal",maxGuesses:6,hints:!0},{key:"moeilijk",label:"Moeilijk",maxGuesses:3,hints:!1}];function silGetDifficulty(){const saved=localStorage.getItem("gg_silhouette_difficulty");return SIL_DIFFICULTIES.find(d=>d.key===saved)||SIL_DIFFICULTIES[0]}let app,sil=null;export function renderSilhouette(rootEl){app=rootEl,app.innerHTML=`${topbar()}<div class="gametitle"><div><h2>${icon("map",{size:"sm"})} Vorm Raden</h2><div class="desc">Landen laden...</div></div></div>`,Promise.all([loadWorld(),loadWorldHD()]).then(()=>{const WORLD_BY_NAME=worldByName(),names=ALL_NAMES.filter(n=>WORLD_BY_NAME[n]),target=names[Math.floor(Math.random()*names.length)];const diff=silGetDifficulty();sil={target:target,guesses:[],over:!1,failed:!1,difficulty:diff.key,maxGuesses:diff.maxGuesses,hints:diff.hints},draw()})}function draw(){const guessesHtml=sil.guesses.map(g=>`\n    <div class="gitem ${g.correct?"correct":""}">\n      <div class="name">${flagEmoji(COUNTRY_DATA[g.name].i)} ${g.name}</div>\n      ${g.correct?"<div></div><div></div>":sil.hints?`<div class="dist">${Math.round(g.km).toLocaleString()} km</div><div class="arrow">${g.arrow}</div>`:`<div></div><div>${icon("close",{size:"sm"})}</div>`}\n      <div class="prox">${g.correct?icon("check",{size:"sm"})+" 100%":sil.hints?g.prox+"%":""}</div>\n    </div>\n  `).join("");if(app.innerHTML=`\n    ${topbar()}\n    <div class="gametitle">\n      <div><h2>${icon("map",{size:"sm"})} Vorm Raden</h2><div class="desc">Welk land heeft deze vorm?</div></div>\n      <div class="pillrow"><span class="pill">Gokken: <span class="n">${sil.guesses.length}</span>${isFinite(sil.maxGuesses)?`/${sil.maxGuesses}`:""}</span><select class="pill-select" id="silDifficultySelect" onchange="silChangeDifficulty(this.value)">${SIL_DIFFICULTIES.map(d=>`<option value="${d.key}" ${d.key===sil.difficulty?"selected":""}>${d.label}</option>`).join("")}</select></div>\n    </div>\n    <div class="shape-wrap ${sil.over?"revealed":""}" id="silShape">${function(){const feature=shapeFeatureFor(sil.target);const centroid=geoCentroid(feature);const projection=geoMercator().rotate([-centroid[0],0]).fitExtent([[16,16],[304,244]],feature);return`<svg viewBox="0 0 320 260" width="100%" height="100%"><path d="${geoPath(projection)(feature)}"/></svg>`}()}</div>\n    ${sil.over?`<div class="msg ${sil.failed?"bad":"good"}" style="text-align:center; font-size:16px;">${sil.failed?"Helaas, geen gokken meer over. ":""}Het antwoord is ${sil.target}! ${flagEmoji(COUNTRY_DATA[sil.target].i)}</div>`:'<div class="inputrow">\n          <input id="silInput" autocomplete="off" placeholder="Typ een landnaam..." />\n          <div class="autocomplete" id="silAuto"></div>\n          <button onclick="silSubmit()">Gok</button>\n        </div>'}\n    <div class="guesslist">${guessesHtml}</div>\n    ${adSlotHtml("silhouetteList")}\n    <div class="footerrow">\n      <div></div>\n      <button class="btn" onclick="silNewGame()">${icon("refresh",{size:"sm"})} Nieuw land</button>\n    </div>\n  `,initAdSlots(),!sil.over){const input=document.getElementById("silInput"),dd=document.getElementById("silAuto"),WORLD_BY_NAME=worldByName();attachAutocomplete(input,dd,candidateNames(ALL_NAMES.filter(n=>WORLD_BY_NAME[n])),()=>{}),input.addEventListener("keydown",e=>{"Enter"===e.key&&silSubmit()}),input.focus()}}function silSubmit(){const input=document.getElementById("silInput"),name=findCountryByLoose(input.value||""),WORLD_BY_NAME=worldByName();if(!name||!WORLD_BY_NAME[name])return;if(sil.guesses.some(g=>g.name===name))return;if(name===sil.target)return sil.guesses.unshift({name:name,correct:!0}),sil.over=!0,void draw();const a=geoCentroid(WORLD_BY_NAME[name]),b=geoCentroid(WORLD_BY_NAME[sil.target]),km=haversineKm(a,b),brg=bearing(a,b);sil.guesses.unshift({name:name,km:km,arrow:compassArrow(brg),prox:proximityPct(km),correct:!1}),sil.guesses.sort((x,y)=>x.correct?-1:y.correct?1:x.km-y.km),sil.guesses.length>=sil.maxGuesses&&(sil.over=!0,sil.failed=!0),draw()}window.silSubmit=silSubmit,window.silNewGame=function(){renderSilhouette(app)},window.silChangeDifficulty=function(key){localStorage.setItem("gg_silhouette_difficulty",key),renderSilhouette(app)};
+import { geoMercator, geoPath, geoCentroid } from "d3-geo";
+import { COUNTRY_DATA } from "../data/countries.js";
+import { ALL_NAMES, loadWorld, loadWorldHD, worldByName, shapeFeatureFor, flagEmoji, attachAutocomplete, haversineKm, bearing, compassArrow, proximityPct, icon } from "../core.js";
+import { topbar } from "../lib/layout.js";
+import { countryName, findCountryByAnyName, localizedCountryCandidates, pick } from "../lib/i18n.js";
+import { adSlotHtml, initAdSlots } from "../lib/ads.js";
+
+const DIFFICULTIES = [
+  { key: "easy", en: "Easy", nl: "Makkelijk", maxGuesses: Infinity, hints: true },
+  { key: "normal", en: "Normal", nl: "Normaal", maxGuesses: 6, hints: true },
+  { key: "hard", en: "Hard", nl: "Moeilijk", maxGuesses: 3, hints: false },
+];
+
+let app;
+let game = null;
+
+function currentDifficulty() {
+  const saved = localStorage.getItem("gg_silhouette_difficulty");
+  return DIFFICULTIES.find((item) => item.key === saved) || DIFFICULTIES[0];
+}
+
+export function renderSilhouette(rootElement) {
+  app = rootElement;
+  app.innerHTML = `${topbar()}<div class="gametitle"><div><h2>${icon("map", { size: "sm" })} ${pick("Shape Guess", "Vorm Raden")}</h2><div class="desc">${pick("Loading countries…", "Landen laden…")}</div></div></div>`;
+  Promise.all([loadWorld(), loadWorldHD()]).then(() => {
+    const names = ALL_NAMES.filter((name) => worldByName()[name]);
+    const difficulty = currentDifficulty();
+    game = { target: names[Math.floor(Math.random() * names.length)], guesses: [], over: false, failed: false, difficulty: difficulty.key, maxGuesses: difficulty.maxGuesses, hints: difficulty.hints };
+    draw();
+  });
+}
+
+function shapeSvg() {
+  const feature = shapeFeatureFor(game.target);
+  const centroid = geoCentroid(feature);
+  const projection = geoMercator().rotate([-centroid[0], 0]).fitExtent([[16, 16], [304, 244]], feature);
+  return `<svg viewBox="0 0 320 260" width="100%" height="100%" role="img" aria-label="${pick("Mystery country silhouette", "Silhouet van het mysterieland")}"><path d="${geoPath(projection)(feature)}"></path></svg>`;
+}
+
+function draw() {
+  const guesses = game.guesses.map((guess) => `<div class="gitem ${guess.correct ? "correct" : ""}"><div class="name">${flagEmoji(COUNTRY_DATA[guess.name].i)} ${countryName(guess.name)}</div>${guess.correct ? "<div></div><div></div>" : game.hints ? `<div class="dist">${Math.round(guess.km).toLocaleString()} km</div><div class="arrow">${guess.arrow}</div>` : `<div></div><div>${icon("close", { size: "sm" })}</div>`}<div class="prox">${guess.correct ? icon("check", { size: "sm" }) + " 100%" : game.hints ? guess.prox + "%" : ""}</div></div>`).join("");
+  const answer = countryName(game.target);
+  app.innerHTML = `${topbar()}
+    <div class="gametitle"><div><h2>${icon("map", { size: "sm" })} ${pick("Shape Guess", "Vorm Raden")}</h2><div class="desc">${pick("Which country has this shape?", "Welk land heeft deze vorm?")}</div></div>
+      <div class="pillrow"><span class="pill">${pick("Guesses", "Gokken")}: <span class="n">${game.guesses.length}</span>${Number.isFinite(game.maxGuesses) ? `/${game.maxGuesses}` : ""}</span><select class="pill-select" aria-label="${pick("Difficulty", "Moeilijkheid")}" onchange="silChangeDifficulty(this.value)">${DIFFICULTIES.map((item) => `<option value="${item.key}" ${item.key === game.difficulty ? "selected" : ""}>${pick(item.en, item.nl)}</option>`).join("")}</select></div></div>
+    <div class="shape-wrap ${game.over ? "revealed" : ""}">${shapeSvg()}</div>
+    ${game.over ? `<div class="msg ${game.failed ? "bad" : "good"}" style="text-align:center;font-size:16px;">${game.failed ? pick("No guesses left. ", "Helaas, geen gokken meer over. ") : ""}${pick("The answer is", "Het antwoord is")} ${answer}! ${flagEmoji(COUNTRY_DATA[game.target].i)}</div>` : `<div class="inputrow"><input id="silInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="silAuto"></div><button onclick="silSubmit()">${pick("Submit", "Gok")}</button></div>`}
+    <div class="guesslist">${guesses}</div>${adSlotHtml("silhouetteList")}
+    <div class="footerrow"><div></div><button class="btn" onclick="silNewGame()">${icon("refresh", { size: "sm" })} ${pick("New country", "Nieuw land")}</button></div>`;
+  initAdSlots();
+  if (!game.over) {
+    const input = document.getElementById("silInput");
+    const names = ALL_NAMES.filter((name) => worldByName()[name]);
+    attachAutocomplete(input, document.getElementById("silAuto"), localizedCountryCandidates(names), () => {});
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
+    input.focus();
+  }
+}
+
+function submit() {
+  const input = document.getElementById("silInput");
+  const name = findCountryByAnyName(input.value, ALL_NAMES);
+  const world = worldByName();
+  if (!name || !world[name] || game.guesses.some((guess) => guess.name === name)) return;
+  if (name === game.target) {
+    game.guesses.unshift({ name, correct: true });
+    game.over = true;
+    draw();
+    return;
+  }
+  const from = geoCentroid(world[name]);
+  const to = geoCentroid(world[game.target]);
+  const km = haversineKm(from, to);
+  game.guesses.unshift({ name, km, arrow: compassArrow(bearing(from, to)), prox: proximityPct(km), correct: false });
+  game.guesses.sort((a, b) => a.correct ? -1 : b.correct ? 1 : a.km - b.km);
+  if (game.guesses.length >= game.maxGuesses) { game.over = true; game.failed = true; }
+  draw();
+}
+
+window.silSubmit = submit;
+window.silNewGame = () => renderSilhouette(app);
+window.silChangeDifficulty = (key) => { localStorage.setItem("gg_silhouette_difficulty", key); renderSilhouette(app); };

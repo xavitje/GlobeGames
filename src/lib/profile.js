@@ -1,5 +1,5 @@
-// Klein lokaal profiel: alleen in deze browser onthouden (localStorage), geen login.
-// Zorgt dat je naam niet elke keer opnieuw hoeft te worden ingetypt bij multiplayer.
+// Lightweight local profile cache used by multiplayer. Signed-in accounts keep
+// the same fields in Supabase user metadata and the account page syncs them here.
 
 import { PLAYER_COLORS } from "../core.js";
 
@@ -30,19 +30,7 @@ function escapeHtml(s) {
 }
 
 export function ensureProfileWidget() {
-  let el = document.getElementById("gg-profile-widget");
-  if (el) el.remove();
-  const p = getProfile();
-  el = document.createElement("div");
-  el.id = "gg-profile-widget";
-  el.className = "gg-profile-widget";
-  el.innerHTML = `
-    <button class="gg-profile-btn" title="Jouw profiel">
-      <span class="gg-profile-dot" style="background:${p.color}"></span>
-      <span class="gg-profile-name">${p.name ? escapeHtml(p.name) : "Profiel"}</span>
-    </button>`;
-  el.querySelector(".gg-profile-btn").addEventListener("click", openProfileEditor);
-  document.body.appendChild(el);
+  document.getElementById("gg-profile-widget")?.remove();
 }
 
 function openProfileEditor() {

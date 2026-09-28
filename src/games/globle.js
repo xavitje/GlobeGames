@@ -1,1 +1,150 @@
-import{geoOrthographic,geoPath,geoCentroid}from"d3-geo";import{interpolateRgb}from"d3-interpolate";import{COUNTRY_DATA}from"../data/countries.js";import{ALL_NAMES,loadWorld,worldByName,flagEmoji,findCountryByLoose,attachAutocomplete,candidateNames,haversineKm,proximityPct,MAX_DIST_KM,topbar,icon}from"../core.js";import{adSlotHtml,initAdSlots}from"../lib/ads.js";let app,gl=null,glCleanupDrag=null;export function renderGlobleGame(rootEl){app=rootEl,glCleanupDrag&&(glCleanupDrag(),glCleanupDrag=null),app.innerHTML=`${topbar()}<div class="gametitle"><div><h2>${icon("globe",{size:"sm"})} GlobeGuess</h2><div class="desc">Wereld laden...</div></div></div>`,loadWorld().then(()=>{const WORLD_BY_NAME=worldByName(),names=ALL_NAMES.filter(n=>WORLD_BY_NAME[n]),target=names[Math.floor(Math.random()*names.length)];gl={target:target,guesses:[],rotate:[10,-15],scale:190,over:!1,projection:null,pathGen:null,pathEls:null,sphereEl:null,svg:null},draw()})}function glMountSvg(container){glCleanupDrag&&(glCleanupDrag(),glCleanupDrag=null);const rootStyle=getComputedStyle(document.documentElement),oceanHi=rootStyle.getPropertyValue("--ocean-hi").trim()||"#eaf4fb",oceanLo=rootStyle.getPropertyValue("--ocean-lo").trim()||"#9fc6e0";container.innerHTML=`<svg id="glSvg" viewBox="0 0 520 420" width="100%" style="max-height:420px; cursor:grab;">\n    <defs>\n      <radialGradient id="glOceanGrad" cx="32%" cy="28%" r="75%">\n        <stop offset="0%" stop-color="${oceanHi}"/>\n        <stop offset="100%" stop-color="${oceanLo}"/>\n      </radialGradient>\n    </defs>\n    <path id="glSphere" fill="url(#glOceanGrad)"></path>\n    <g id="glCountries"></g>\n  </svg>`;const svg=document.getElementById("glSvg"),g=document.getElementById("glCountries"),WORLD=worldByName();gl.svg=svg,gl.sphereEl=document.getElementById("glSphere");const worldData=Object.values(WORLD);gl.pathEls=worldData.map(f=>{const el=document.createElementNS("http://www.w3.org/2000/svg","path");return el.setAttribute("class","country"),g.appendChild(el),{el:el,f:f}}),function(w,h){gl.projection=geoOrthographic().scale(gl.scale).translate([w/2,h/2]).rotate(gl.rotate).clipAngle(90),gl.pathGen=geoPath(gl.projection)}(520,420),glApplyGeometry(),gl.pathEls.forEach(({el:el,f:f})=>{const name=f.properties.name,g=gl.guesses.find(x=>x.name===name);g?(el.classList.add("guessed"),el.style.fill=function(km,isTarget){if(isTarget)return"#1fa971";const t=Math.max(0,Math.min(1,1-km/MAX_DIST_KM));return interpolateRgb("#c9cedb","#e2482f")(Math.pow(t,1.35))}(g.km,name===gl.target)):(el.classList.remove("guessed"),el.style.fill="")}),function(svg){let dragging=!1,last=null,rafId=null,pendingRotate=null,velocity=[0,0],lastT=0,momentumId=null;function scheduleGeometry(){rafId||(rafId=requestAnimationFrame(()=>{rafId=null,pendingRotate&&(gl.rotate=pendingRotate,pendingRotate=null,glApplyGeometry())}))}function onDown(x,y){cancelMomentum(),dragging=!0,last=[x,y],velocity=[0,0],lastT=performance.now(),svg.classList.add("dragging")}function onMove(x,y){if(!dragging)return;const now=performance.now(),dt=Math.max(1,now-lastT),dx=x-last[0],dy=y-last[1],cur=pendingRotate||gl.rotate,newLat=Math.max(-90,Math.min(90,cur[1]-.35*dy));pendingRotate=[cur[0]+.35*dx,newLat],velocity=[.35*dx/dt*16,.35*-dy/dt*16],last=[x,y],lastT=now,scheduleGeometry()}function onUp(){dragging&&(dragging=!1,svg.classList.remove("dragging"),startMomentum())}function startMomentum(){let[vx,vy]=velocity;function step(){if(vx*=.93,vy*=.93,Math.hypot(vx,vy)<.02)return void(momentumId=null);const cur=gl.rotate;gl.rotate=[cur[0]+vx,Math.max(-90,Math.min(90,cur[1]+vy))],glApplyGeometry(),momentumId=requestAnimationFrame(step)}Math.hypot(vx,vy)<.02||(momentumId=requestAnimationFrame(step))}function cancelMomentum(){momentumId&&(cancelAnimationFrame(momentumId),momentumId=null)}function onWheel(e){e.preventDefault(),gl.scale=Math.max(140,Math.min(280,gl.scale-.25*e.deltaY)),glApplyGeometry()}const mdown=e=>{onDown(e.clientX,e.clientY),e.preventDefault()},mmove=e=>onMove(e.clientX,e.clientY),mup=()=>onUp(),tstart=e=>{const t=e.touches[0];onDown(t.clientX,t.clientY)},tmove=e=>{const t=e.touches[0];onMove(t.clientX,t.clientY),e.preventDefault()},tend=()=>onUp();svg.addEventListener("mousedown",mdown),window.addEventListener("mousemove",mmove),window.addEventListener("mouseup",mup),svg.addEventListener("touchstart",tstart,{passive:!0}),svg.addEventListener("touchmove",tmove,{passive:!1}),svg.addEventListener("touchend",tend),svg.addEventListener("wheel",onWheel,{passive:!1}),glCleanupDrag=()=>{cancelMomentum(),rafId&&cancelAnimationFrame(rafId),svg.removeEventListener("mousedown",mdown),window.removeEventListener("mousemove",mmove),window.removeEventListener("mouseup",mup),svg.removeEventListener("touchstart",tstart),svg.removeEventListener("touchmove",tmove),svg.removeEventListener("touchend",tend),svg.removeEventListener("wheel",onWheel)}}(svg)}function glApplyGeometry(){gl.projection.rotate(gl.rotate).scale(gl.scale),gl.sphereEl.setAttribute("d",gl.pathGen({type:"Sphere"})),gl.pathEls.forEach(({el:el,f:f})=>{const d=gl.pathGen(f);d?(el.setAttribute("d",d),el.style.display=""):el.style.display="none"})}function draw(){const guessesHtml=gl.guesses.map(g=>`\n    <div class="gitem ${g.correct?"correct":""}">\n      <div class="name">${flagEmoji(COUNTRY_DATA[g.name].i)} ${g.name}</div>\n      <div class="dist">${g.correct?"":Math.round(g.km).toLocaleString()+" km"}</div>\n      <div></div>\n      <div class="prox">${g.correct?icon("check",{size:"sm"}):g.prox+"%"}</div>\n    </div>\n  `).join("");if(app.innerHTML=`\n    ${topbar()}\n    <div class="gametitle">\n      <div><h2>${icon("globe",{size:"sm"})} GlobeGuess</h2><div class="desc">Raad het mysterieland — hoe warmer de kleur, hoe dichterbij.</div></div>\n      <div class="pillrow"><span class="pill">Gokken: <span class="n">${gl.guesses.length}</span></span></div>\n    </div>\n    <div class="globe-wrap" id="globeContainer"></div>\n    ${gl.over?`<div class="msg good" style="text-align:center; font-size:16px;">Het mysterieland is ${gl.target}! ${flagEmoji(COUNTRY_DATA[gl.target].i)}</div>`:'<div class="inputrow">\n          <input id="glInput" autocomplete="off" placeholder="Typ een landnaam..." />\n          <div class="autocomplete" id="glAuto"></div>\n          <button onclick="glSubmit()">Gok</button>\n        </div>'}\n    ${gl.over?adSlotHtml("globleEnd"):""}\n    <div class="guesslist">${guessesHtml}</div>\n    <div class="footerrow">\n      <div class="small">Sleep om te draaien · scroll om te zoomen</div>\n      <button class="btn" onclick="glNewGame()">${icon("refresh",{size:"sm"})} Nieuw land</button>\n    </div>\n  `,glMountSvg(document.getElementById("globeContainer")),initAdSlots(),!gl.over){const input=document.getElementById("glInput"),dd=document.getElementById("glAuto"),WORLD_BY_NAME=worldByName();attachAutocomplete(input,dd,candidateNames(ALL_NAMES.filter(n=>WORLD_BY_NAME[n]&&!gl.guesses.some(g=>g.name===n))),()=>{}),input.addEventListener("keydown",e=>{"Enter"===e.key&&glSubmit()}),input.focus()}}function glSubmit(){const input=document.getElementById("glInput"),name=findCountryByLoose(input.value||""),WORLD_BY_NAME=worldByName();if(!name||!WORLD_BY_NAME[name])return;if(gl.guesses.some(g=>g.name===name))return;const a=geoCentroid(WORLD_BY_NAME[name]),b=geoCentroid(WORLD_BY_NAME[gl.target]),km=haversineKm(a,b),correct=name===gl.target;gl.guesses.unshift({name:name,km:km,prox:proximityPct(km),correct:correct}),gl.guesses.sort((x,y)=>x.correct?-1:y.correct?1:x.km-y.km),gl.rotate=[-a[0],.6*-a[1]],correct&&(gl.over=!0),draw()}window.glSubmit=glSubmit,window.glNewGame=function(){renderGlobleGame(app)};
+import { geoOrthographic, geoPath, geoCentroid } from "d3-geo";
+import { interpolateRgb } from "d3-interpolate";
+import { COUNTRY_DATA } from "../data/countries.js";
+import { ALL_NAMES, loadWorld, worldByName, flagEmoji, attachAutocomplete, haversineKm, proximityPct, MAX_DIST_KM, icon } from "../core.js";
+import { topbar } from "../lib/layout.js";
+import { countryName, findCountryByAnyName, localizedCountryCandidates, pick } from "../lib/i18n.js";
+import { adSlotHtml, initAdSlots } from "../lib/ads.js";
+
+let app;
+let game = null;
+let cleanupDrag = null;
+
+export function renderGlobleGame(rootElement) {
+  app = rootElement;
+  cleanupGloble();
+  app.innerHTML = `${topbar()}<div class="gametitle"><div><h2>${icon("globe", { size: "sm" })} GlobeGuess</h2><div class="desc">${pick("Loading world…", "Wereld laden…")}</div></div></div>`;
+  loadWorld().then(() => {
+    const names = ALL_NAMES.filter((name) => worldByName()[name]);
+    game = { target: names[Math.floor(Math.random() * names.length)], guesses: [], rotate: [10, -15], scale: 190, over: false, projection: null, pathGen: null, pathEls: null, sphereEl: null, svg: null };
+    draw();
+  });
+}
+
+export function cleanupGloble() {
+  if (cleanupDrag) cleanupDrag();
+  cleanupDrag = null;
+}
+
+function mountGlobe(container) {
+  cleanupGloble();
+  const rootStyle = getComputedStyle(document.documentElement);
+  const oceanHi = rootStyle.getPropertyValue("--ocean-hi").trim() || "#eaf4fb";
+  const oceanLo = rootStyle.getPropertyValue("--ocean-lo").trim() || "#9fc6e0";
+  container.innerHTML = `<svg id="glSvg" viewBox="0 0 520 420" width="100%" style="max-height:420px;cursor:grab" role="img" aria-label="${pick("Interactive world globe", "Interactieve wereldbol")}"><defs><radialGradient id="glOceanGrad" cx="32%" cy="28%" r="75%"><stop offset="0%" stop-color="${oceanHi}"></stop><stop offset="100%" stop-color="${oceanLo}"></stop></radialGradient></defs><path id="glSphere" fill="url(#glOceanGrad)"></path><g id="glCountries"></g></svg>`;
+  const svg = container.querySelector("#glSvg");
+  const group = container.querySelector("#glCountries");
+  game.svg = svg;
+  game.sphereEl = container.querySelector("#glSphere");
+  game.pathEls = Object.values(worldByName()).map((feature) => {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    element.setAttribute("class", "country");
+    group.appendChild(element);
+    return { el: element, f: feature };
+  });
+  game.projection = geoOrthographic().scale(game.scale).translate([260, 210]).rotate(game.rotate).clipAngle(90);
+  game.pathGen = geoPath(game.projection);
+  applyGeometry();
+  game.pathEls.forEach(({ el, f }) => {
+    const guess = game.guesses.find((item) => item.name === f.properties.name);
+    if (!guess) return;
+    el.classList.add("guessed");
+    const closeness = Math.max(0, Math.min(1, 1 - guess.km / MAX_DIST_KM));
+    el.style.fill = f.properties.name === game.target ? "#1fa971" : interpolateRgb("#c9cedb", "#e2482f")(closeness ** 1.35);
+  });
+
+  let dragging = false;
+  let last = null;
+  let velocity = [0, 0];
+  let momentum = null;
+  const cancelMomentum = () => { if (momentum) cancelAnimationFrame(momentum); momentum = null; };
+  const down = (x, y) => { cancelMomentum(); dragging = true; last = [x, y]; velocity = [0, 0]; svg.classList.add("dragging"); };
+  const move = (x, y) => {
+    if (!dragging) return;
+    const dx = x - last[0], dy = y - last[1];
+    game.rotate = [game.rotate[0] + dx * 0.35, Math.max(-90, Math.min(90, game.rotate[1] - dy * 0.35))];
+    velocity = [dx * 0.35, -dy * 0.35];
+    last = [x, y];
+    applyGeometry();
+  };
+  const startMomentum = () => {
+    let [vx, vy] = velocity;
+    const frame = () => {
+      vx *= 0.93; vy *= 0.93;
+      if (Math.hypot(vx, vy) < 0.02) { momentum = null; return; }
+      game.rotate = [game.rotate[0] + vx, Math.max(-90, Math.min(90, game.rotate[1] + vy))];
+      applyGeometry();
+      momentum = requestAnimationFrame(frame);
+    };
+    if (Math.hypot(vx, vy) >= 0.02) momentum = requestAnimationFrame(frame);
+  };
+  const up = () => { if (dragging) { dragging = false; svg.classList.remove("dragging"); startMomentum(); } };
+  const mouseDown = (event) => { down(event.clientX, event.clientY); event.preventDefault(); };
+  const mouseMove = (event) => move(event.clientX, event.clientY);
+  const touchStart = (event) => down(event.touches[0].clientX, event.touches[0].clientY);
+  const touchMove = (event) => { move(event.touches[0].clientX, event.touches[0].clientY); event.preventDefault(); };
+  const wheel = (event) => { event.preventDefault(); game.scale = Math.max(140, Math.min(280, game.scale - event.deltaY * 0.25)); applyGeometry(); };
+  svg.addEventListener("mousedown", mouseDown);
+  window.addEventListener("mousemove", mouseMove);
+  window.addEventListener("mouseup", up);
+  svg.addEventListener("touchstart", touchStart, { passive: true });
+  svg.addEventListener("touchmove", touchMove, { passive: false });
+  svg.addEventListener("touchend", up);
+  svg.addEventListener("wheel", wheel, { passive: false });
+  cleanupDrag = () => {
+    cancelMomentum();
+    svg.removeEventListener("mousedown", mouseDown);
+    window.removeEventListener("mousemove", mouseMove);
+    window.removeEventListener("mouseup", up);
+    svg.removeEventListener("touchstart", touchStart);
+    svg.removeEventListener("touchmove", touchMove);
+    svg.removeEventListener("touchend", up);
+    svg.removeEventListener("wheel", wheel);
+  };
+}
+
+function applyGeometry() {
+  if (!game?.projection) return;
+  game.projection.rotate(game.rotate).scale(game.scale);
+  game.sphereEl.setAttribute("d", game.pathGen({ type: "Sphere" }));
+  game.pathEls.forEach(({ el, f }) => {
+    const path = game.pathGen(f);
+    if (path) { el.setAttribute("d", path); el.style.display = ""; } else el.style.display = "none";
+  });
+}
+
+function draw() {
+  const guesses = game.guesses.map((guess) => `<div class="gitem ${guess.correct ? "correct" : ""}"><div class="name">${flagEmoji(COUNTRY_DATA[guess.name].i)} ${countryName(guess.name)}</div><div class="dist">${guess.correct ? "" : Math.round(guess.km).toLocaleString() + " km"}</div><div></div><div class="prox">${guess.correct ? icon("check", { size: "sm" }) : guess.prox + "%"}</div></div>`).join("");
+  app.innerHTML = `${topbar()}<div class="gametitle"><div><h2>${icon("globe", { size: "sm" })} GlobeGuess</h2><div class="desc">${pick("Find the mystery country — warmer colours mean you are closer.", "Raad het mysterieland — hoe warmer de kleur, hoe dichterbij.")}</div></div><div class="pillrow"><span class="pill">${pick("Guesses", "Gokken")}: <span class="n">${game.guesses.length}</span></span></div></div>
+    <div class="globe-wrap" id="globeContainer"></div>
+    ${game.over ? `<div class="msg good" style="text-align:center;font-size:16px;">${pick("The mystery country is", "Het mysterieland is")} ${countryName(game.target)}! ${flagEmoji(COUNTRY_DATA[game.target].i)}</div>` : `<div class="inputrow"><input id="glInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="glAuto"></div><button onclick="glSubmit()">${pick("Submit", "Gok")}</button></div>`}
+    ${game.over ? adSlotHtml("globleEnd") : ""}<div class="guesslist">${guesses}</div><div class="footerrow"><div class="small">${pick("Drag to rotate · scroll to zoom", "Sleep om te draaien · scroll om te zoomen")}</div><button class="btn" onclick="glNewGame()">${icon("refresh", { size: "sm" })} ${pick("New country", "Nieuw land")}</button></div>`;
+  mountGlobe(document.getElementById("globeContainer"));
+  initAdSlots();
+  if (!game.over) {
+    const input = document.getElementById("glInput");
+    const names = ALL_NAMES.filter((name) => worldByName()[name] && !game.guesses.some((guess) => guess.name === name));
+    attachAutocomplete(input, document.getElementById("glAuto"), localizedCountryCandidates(names), () => {});
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
+    input.focus();
+  }
+}
+
+function submit() {
+  const input = document.getElementById("glInput");
+  const name = findCountryByAnyName(input.value, ALL_NAMES);
+  const world = worldByName();
+  if (!name || !world[name] || game.guesses.some((guess) => guess.name === name)) return;
+  const from = geoCentroid(world[name]);
+  const to = geoCentroid(world[game.target]);
+  const km = haversineKm(from, to);
+  const correct = name === game.target;
+  game.guesses.unshift({ name, km, prox: proximityPct(km), correct });
+  game.guesses.sort((a, b) => a.correct ? -1 : b.correct ? 1 : a.km - b.km);
+  game.rotate = [-from[0], -from[1] * 0.6];
+  if (correct) game.over = true;
+  draw();
+}
+
+window.glSubmit = submit;
+window.glNewGame = () => renderGlobleGame(app);

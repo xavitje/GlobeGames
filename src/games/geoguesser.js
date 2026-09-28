@@ -1,5 +1,9 @@
 import { GEO_POINTS, LOCATION_SETS } from "../data/geoPoints.js";
-import { ALL_NAMES, haversineKm, topbar, attachAutocomplete, candidateNames, findCountryByLoose, icon, PLAYER_COLORS } from "../core.js";
+import { ALL_NAMES, haversineKm, attachAutocomplete, icon, PLAYER_COLORS } from "../core.js";
+import { topbar } from "../lib/layout.js";
+import { countryName, findCountryByAnyName, localizedCountryCandidates, pick } from "../lib/i18n.js";
+import { DARK_MAP_STYLE } from "./geoguesser/map-style.js";
+import { buildDailyShareText, getDailyKey, getDailyResult, getStreakBest, hashStringToSeed, mulberry32, saveDailyResult, scoreForDistance, setStreakBest } from "./geoguesser/challenge-utils.js";
 import {
   hasGoogleMapsKey,
   loadGoogleMaps,
@@ -65,37 +69,29 @@ function updateCheatHint() {
 // Gedeelde speler-kleuren (PLAYER_COLORS) komen nu uit core.js i.p.v. een
 // eigen "snoep"-set hier.
 
-// Dark blue Google Maps style for the guess map
-const DARK_MAP_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
-  { featureType: "administrative.country", elementType: "geometry.stroke", stylers: [{ color: "#4b6878" }] },
-  { featureType: "administrative.country", elementType: "labels.text.fill", stylers: [{ color: "#aecbca" }] },
-  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#023e58" }] },
-  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#283d6a" }] },
-  { featureType: "poi.park", elementType: "geometry.fill", stylers: [{ color: "#023e58" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#304a7d" }] },
-  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#98a5be" }] },
-  { featureType: "road", elementType: "labels.text.stroke", stylers: [{ color: "#1d2c4d" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#2c6675" }] },
-  { featureType: "transit.line", elementType: "geometry.fill", stylers: [{ color: "#283d6a" }] },
-  { featureType: "transit.station", elementType: "geometry", stylers: [{ color: "#3a4762" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e1626" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#4e6d70" }] },
-];
-
 // ---------- Location set helpers ----------
 
 // All landen waar we punten voor hebben, gesorteerd — voor de "specifiek
 // land"-kiezer (solo én multiplayer).
-const ALL_GEO_COUNTRIES = Object.keys(GEO_POINTS).sort((a, b) => a.localeCompare(b, "nl"));
+const ALL_GEO_COUNTRIES = Object.keys(GEO_POINTS).sort((a, b) => countryName(a).localeCompare(countryName(b)));
+const LOCATION_LABELS = {
+  world: ["Worldwide", "Hele wereld"], capitals: ["Capital cities", "Hoofdsteden"],
+  bigcities: ["Major cities", "Grote steden"], europe: ["Europe", "Europa"],
+  americas: ["The Americas", "Amerika's"], asia: ["Asia", "Azië"],
+  africa: ["Africa", "Afrika"], oceania: ["Oceania", "Oceanië"],
+  netherlands: ["The Netherlands", "Nederland"], landmarks: ["Famous landmarks", "Beroemde bezienswaardigheden"],
+};
+
+function locationPresetLabel(key, fallback) {
+  const labels = LOCATION_LABELS[key];
+  return labels ? pick(labels[0], labels[1]) : fallback;
+}
 
 // `loc` is ofwel een bestaande preset-key ("world", "europe", ...) ofwel
 // een object { type: "country", name } voor een door de speler gekozen land.
 function resolveLocationSet(loc) {
   if (loc && typeof loc === "object" && loc.type === "country" && GEO_POINTS[loc.name]) {
-    return { label: `${icon("flag", { size: "sm" })} ${loc.name}`, countries: [loc.name], onlyCapital: false };
+    return { label: `${icon("flag", { size: "sm" })} ${countryName(loc.name)}`, countries: [loc.name], onlyCapital: false };
   }
   return LOCATION_SETS[loc] || LOCATION_SETS["world"];
 }
@@ -123,15 +119,15 @@ function locationSettingHtml(idPrefix, current) {
   const isCountry = current && typeof current === "object" && current.type === "country";
   const selectedKey = isCountry ? "country" : (current || "world");
   const presetOptions = Object.entries(LOCATION_SETS)
-    .map(([key, s]) => `<option value="${key}" ${key === selectedKey ? "selected" : ""}>${s.label}</option>`)
+    .map(([key, s]) => `<option value="${key}" ${key === selectedKey ? "selected" : ""}>${locationPresetLabel(key, s.label)}</option>`)
     .join("");
   const countryOptions = ALL_GEO_COUNTRIES
-    .map((name) => `<option value="${name}" ${isCountry && current.name === name ? "selected" : ""}>${name}</option>`)
+    .map((name) => `<option value="${name}" ${isCountry && current.name === name ? "selected" : ""}>${countryName(name)}</option>`)
     .join("");
   return `
     <div class="gg-select-wrap"><select id="${idPrefix}LocationSet" class="gg-select">
       ${presetOptions}
-      <option value="country" ${selectedKey === "country" ? "selected" : ""}>Specifiek land</option>
+      <option value="country" ${selectedKey === "country" ? "selected" : ""}>${pick("Specific country", "Specifiek land")}</option>
     </select></div>
     <div class="gg-select-wrap" id="${idPrefix}CountryWrap" style="margin-top:8px; ${selectedKey === "country" ? "" : "display:none;"}">
       <select id="${idPrefix}CountrySelect" class="gg-select">${countryOptions}</select>
@@ -157,67 +153,6 @@ function readLocationSetting(idPrefix) {
   return val;
 }
 
-// ---------- Seeded RNG (for the daily challenge) ----------
-
-function hashStringToSeed(str) {
-  let h = 1779033703 ^ str.length;
-  for (let i = 0; i < str.length; i++) {
-    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return h >>> 0;
-}
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-// ---------- Streak: best-score persistence ----------
-
-function getStreakBest() {
-  try { return parseInt(localStorage.getItem("gg_streak_best") || "0", 10) || 0; }
-  catch (e) { return 0; }
-}
-function setStreakBest(n) {
-  try { localStorage.setItem("gg_streak_best", String(n)); } catch (e) {}
-}
-
-// ---------- Daily challenge: seed, persistence, share text ----------
-
-function getDailyKey() {
-  const d = new Date();
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-function getDailyResult() {
-  try {
-    const raw = localStorage.getItem("gg_daily_" + getDailyKey());
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) { return null; }
-}
-function saveDailyResult(result) {
-  try { localStorage.setItem("gg_daily_" + getDailyKey(), JSON.stringify(result)); } catch (e) {}
-}
-function dailyDayNumber() {
-  const epoch = Date.UTC(2026, 0, 1);
-  return Math.max(1, Math.floor((Date.now() - epoch) / 86400000) + 1);
-}
-function buildDailyShareText(result) {
-  const blocks = result.history.map((h) => (h.pts >= 4500 ? "🟩" : h.pts >= 2500 ? "🟨" : "🟥")).join("");
-  return `GlobeGames Daily #${dailyDayNumber()} — ${result.totalScore}/${result.rounds * 5000} pts\n${blocks}\n${location.origin}/geoguesser`;
-}
-
-function scoreForDistance(km) {
-  if (km < 20) return 5000;
-  return Math.max(0, Math.round(5000 * Math.exp(-km / 2000)));
-}
-
 // ---------- Multiplayer round timer (host-configurable) ----------
 
 // ---------- Moeilijkheidsgraad + zwart-wit (gedeeld tussen solo en mp) ----------
@@ -225,15 +160,15 @@ function scoreForDistance(km) {
 function difficultySettingHtml(idPrefix, difficulty, blackwhite) {
   const d = difficulty || "free";
   return `
-    <label class="gg-label" style="margin-top:16px;">Moeilijkheidsgraad</label>
+    <label class="gg-label" style="margin-top:16px;">${pick("Difficulty", "Moeilijkheidsgraad")}</label>
     <div class="gg-pill-row" id="${idPrefix}DifficultyPills">
-      <button class="gg-pill-btn${d === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
-      <button class="gg-pill-btn${d === "nomove" ? " active" : ""}" data-v="nomove">Niet bewegen</button>
+      <button class="gg-pill-btn${d === "free" ? " active" : ""}" data-v="free">${pick("Move freely", "Vrij bewegen")}</button>
+      <button class="gg-pill-btn${d === "nomove" ? " active" : ""}" data-v="nomove">${pick("No moving", "Niet bewegen")}</button>
       <button class="gg-pill-btn${d === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
-      <button class="gg-pill-btn${d === "gamble" ? " active" : ""}" data-v="gamble" title="Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.">${icon("chip", { size: "sm" })} Gokken</button>
+      <button class="gg-pill-btn${d === "gamble" ? " active" : ""}" data-v="gamble" title="${pick("Move freely, then bank or double your points after every round.", "Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.")}">${icon("chip", { size: "sm" })} ${pick("Gamble", "Gokken")}</button>
     </div>
     <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
-      <input type="checkbox" id="${idPrefix}BlackWhite" ${blackwhite ? "checked" : ""} /> Zwart-wit
+      <input type="checkbox" id="${idPrefix}BlackWhite" ${blackwhite ? "checked" : ""} /> ${pick("Black and white", "Zwart-wit")}
     </label>`;
 }
 
@@ -259,16 +194,16 @@ function timerSettingHtml(idPrefix, seconds) {
   const enabled = seconds != null;
   const val = seconds || 60;
   return `
-    <label class="gg-label" style="margin-top:16px;">Tijdslimiet per ronde</label>
+    <label class="gg-label" style="margin-top:16px;">${pick("Time limit per round", "Tijdslimiet per ronde")}</label>
     <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap:wrap;">
       <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
         <input type="checkbox" id="${idPrefix}TimerEnabled" ${enabled ? "checked" : ""} />
-        Aan
+        ${pick("On", "Aan")}
       </label>
       <input type="number" id="${idPrefix}TimerSeconds" min="30" max="180" step="15" value="${val}"
         ${enabled ? "" : "disabled"}
         style="width:80px; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
-      <span class="small">seconden (30–180)</span>
+      <span class="small">${pick("seconds", "seconden")} (30–180)</span>
     </div>`;
 }
 
@@ -375,6 +310,10 @@ function teardown() {
   document.getElementById("ggConnBanner")?.remove();
 }
 
+export function cleanupGeoGuesser() {
+  teardown();
+}
+
 // ---------- Reconnect: onthoud lobby-sessie zodat een page-reload 'm terugvindt ----------
 
 function saveLobbySession() {
@@ -422,12 +361,12 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
 
   if (!hasGoogleMapsKey()) {
     app.innerHTML = `${topbar()}
-      <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">Even instellen voordat je kunt spelen.</div></div></div>
+      <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">${pick("One setup step before you can play.", "Even instellen voordat je kunt spelen.")}</div></div></div>
       <div class="card" style="cursor:default;">
         ${icon("key", { size: "xl" })}
-        <h3>Google Maps-key ontbreekt</h3>
-        <p style="margin-bottom:10px;">Dit spel gebruikt echte <a class="linklike" href="https://developers.google.com/maps/documentation/javascript/streetview" target="_blank" rel="noopener">Google Street View</a>-panorama's. Maak een API-key aan en zet 'm in <code>.env</code>:</p>
-        <div class="small" style="background:var(--panel2); padding:10px 12px; border-radius:10px; font-family:monospace;">VITE_GOOGLE_MAPS_KEY=jouw-key</div>
+        <h3>${pick("Google Maps key is missing", "Google Maps-key ontbreekt")}</h3>
+        <p style="margin-bottom:10px;">${pick("This game uses real", "Dit spel gebruikt echte")} <a class="linklike" href="https://developers.google.com/maps/documentation/javascript/streetview" target="_blank" rel="noopener">Google Street View</a> ${pick("panoramas. Create an API key and add it to", "panorama's. Maak een API-key aan en zet 'm in")} <code>.env</code>:</p>
+        <div class="small" style="background:var(--panel2); padding:10px 12px; border-radius:10px; font-family:monospace;">VITE_GOOGLE_MAPS_KEY=${pick("your-key", "jouw-key")}</div>
       </div>`;
     return;
   }
@@ -470,15 +409,15 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
 function drawReconnectPrompt(saved) {
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Opnieuw verbinden?</h2><div class="desc">Je zat nog in een lobby.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} ${pick("Reconnect?", "Opnieuw verbinden?")}</h2><div class="desc">${pick("You were still in a lobby.", "Je zat nog in een lobby.")}</div></div></div>
     <div class="card" style="cursor:default; text-align:center;">
       ${icon("wifi", { size: "xl" })}
-      <h3>Opnieuw verbinden met lobby ${saved.code}?</h3>
-      <p>Je was verbonden als <strong>${saved.name}</strong>.</p>
+      <h3>${pick("Reconnect to lobby", "Opnieuw verbinden met lobby")} ${saved.code}?</h3>
+      <p>${pick("You were connected as", "Je was verbonden als")} <strong>${saved.name}</strong>.</p>
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="ggDismissReconnect()">Nee, terug naar menu</button>
-      <button class="btn primary" onclick="ggReconnectLobby()">Ja, opnieuw verbinden ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" onclick="ggDismissReconnect()">${pick("No, back to menu", "Nee, terug naar menu")}</button>
+      <button class="btn primary" onclick="ggReconnectLobby()">${pick("Yes, reconnect", "Ja, opnieuw verbinden")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   window.__ggPendingReconnect = saved;
 }
@@ -499,15 +438,15 @@ window.ggReconnectLobby = async function () {
 function drawAutoJoinScreen(code) {
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby joinen</h2><div class="desc">Je bent uitgenodigd voor lobby <strong>${code.toUpperCase()}</strong>.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} ${pick("Join lobby", "Lobby joinen")}</h2><div class="desc">${pick("You were invited to lobby", "Je bent uitgenodigd voor lobby")} <strong>${code.toUpperCase()}</strong>.</div></div></div>
     <div class="card" style="cursor:default;">
-      <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggAutoJoinName" type="text" placeholder="Typ je naam..." maxlength="18" value="${getProfile().name || ''}"
+      <h3 style="margin-bottom:10px;">${pick("Your name", "Jouw naam")}</h3>
+      <input id="ggAutoJoinName" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${getProfile().name || ''}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="ggAutoJoin('${code}')">Joinen ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" onclick="ggAutoJoin('${code}')">${pick("Join", "Joinen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
 }
 
@@ -518,7 +457,7 @@ window.ggAutoJoin = async function (code) {
     const p = getProfile();
     if (p.name !== typed) saveProfile({ ...p, name: typed });
   }
-  const name = typed || "Speler" + Math.floor(Math.random() * 900 + 100);
+  const name = typed || pick("Player", "Speler") + Math.floor(Math.random() * 900 + 100);
   await enterLobby(code, name, false, null);
 };
 
@@ -529,24 +468,24 @@ function drawStartScreen() {
   const dailyResult = getDailyResult();
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">Waar op aarde is dit?</div></div></div>
-    <div class="card" style="cursor:pointer;" onclick="ggShowSoloSettings()">
-      ${icon("user", { size: "lg" })}<h3>Solo spelen</h3>
-      <p>Kies je rondes, locaties en moeilijkheidsgraad.</p>
-    </div>
-    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="ggStartStreak()">
+    <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">${pick("Where on Earth is this?", "Waar op aarde is dit?")}</div></div></div>
+    <div class="game-mode-grid">
+    <button type="button" class="card game-mode-card" onclick="ggShowSoloSettings()">
+      ${icon("user", { size: "lg" })}<h3>${pick("Play solo", "Solo spelen")}</h3>
+      <p>${pick("Choose rounds, locations and difficulty.", "Kies je rondes, locaties en moeilijkheidsgraad.")}</p>
+    </button>
+    <button type="button" class="card game-mode-card" onclick="ggStartStreak()">
       ${icon("flame", { size: "lg" })}<h3>Streak</h3>
-      <p>Raad landen op rij, zo lang je kan. Beste streak: <strong>${streakBest}</strong></p>
-    </div>
-    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="ggStartDaily()">
-      ${icon("calendar", { size: "lg" })}<h3>Dagelijkse challenge</h3>
-      <p>${dailyResult ? `Vandaag al gespeeld: <strong>${dailyResult.totalScore} pts</strong> — bekijk je resultaat.` : "5 vaste rondes, elke dag hetzelfde voor iedereen."}</p>
-    </div>
-    <div class="card" style="cursor:${mpAvailable ? "pointer" : "default"}; opacity:${mpAvailable ? "1" : "0.55"}; margin-top:12px;"
-      ${mpAvailable ? 'onclick="ggShowMultiplayerMenu()"' : ""}>
-      ${icon("users", { size: "lg" })}<h3>Met vrienden (multiplayer)</h3>
-      <p>${mpAvailable ? "Maak een lobby of join er een met een code." : "Multiplayer niet ingesteld (Supabase-variabelen ontbreken)."}</p>
-    </div>
+      <p>${pick("Guess countries in a row for as long as you can. Best streak:", "Raad landen op rij, zo lang je kan. Beste streak:")} <strong>${streakBest}</strong></p>
+    </button>
+    <button type="button" class="card game-mode-card" onclick="ggStartDaily()">
+      ${icon("calendar", { size: "lg" })}<h3>${pick("Daily challenge", "Dagelijkse challenge")}</h3>
+      <p>${dailyResult ? pick(`Already played today: <strong>${dailyResult.totalScore} pts</strong> — view your result.`, `Vandaag al gespeeld: <strong>${dailyResult.totalScore} pts</strong> — bekijk je resultaat.`) : pick("5 fixed rounds, identical for everyone each day.", "5 vaste rondes, elke dag hetzelfde voor iedereen.")}</p>
+    </button>
+    <button type="button" class="card game-mode-card" ${mpAvailable ? 'onclick="ggShowMultiplayerMenu()"' : "disabled"}>
+      ${icon("users", { size: "lg" })}<h3>${pick("Play with friends", "Met vrienden")} <span class="muted">(multiplayer)</span></h3>
+      <p>${mpAvailable ? pick("Create a lobby or join one with a code.", "Maak een lobby of join er een met een code.") : pick("Multiplayer is not configured yet.", "Multiplayer is nog niet ingesteld.")}</p>
+    </button></div>
     ${adSlotHtml("geoguesserSettings")}`;
   initAdSlots();
 }
@@ -558,30 +497,30 @@ window.ggShowSoloSettings = function (prefill = {}) {
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("user", { size: "sm" })} Solo spelen</h2><div class="desc">Kies je instellingen.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("user", { size: "sm" })} ${pick("Play solo", "Solo spelen")}</h2><div class="desc">${pick("Choose your settings.", "Kies je instellingen.")}</div></div></div>
     <div class="card" style="cursor:default;">
-      <h3 style="margin-bottom:14px;">Instellingen</h3>
-      <label class="gg-label">Aantal rondes</label>
+      <h3 style="margin-bottom:14px;">${pick("Settings", "Instellingen")}</h3>
+      <label class="gg-label">${pick("Number of rounds", "Aantal rondes")}</label>
       <div class="gg-pill-row" id="soloRoundPills">
         ${[3,5,7,10].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n}</button>`).join("")}
       </div>
-      <label class="gg-label" style="margin-top:16px;">Locaties</label>
+      <label class="gg-label" style="margin-top:16px;">${pick("Locations", "Locaties")}</label>
       ${locationSettingHtml("solo", prefill.locationSet)}
-      <label class="gg-label" style="margin-top:16px;">Moeilijkheidsgraad</label>
+      <label class="gg-label" style="margin-top:16px;">${pick("Difficulty", "Moeilijkheidsgraad")}</label>
       <div class="gg-pill-row" id="soloDifficultyPills">
-        <button class="gg-pill-btn${(prefill.difficulty || "free") === "free" ? " active" : ""}" data-v="free">Vrij bewegen</button>
-        <button class="gg-pill-btn${prefill.difficulty === "nomove" ? " active" : ""}" data-v="nomove">Niet bewegen</button>
+        <button class="gg-pill-btn${(prefill.difficulty || "free") === "free" ? " active" : ""}" data-v="free">${pick("Move freely", "Vrij bewegen")}</button>
+        <button class="gg-pill-btn${prefill.difficulty === "nomove" ? " active" : ""}" data-v="nomove">${pick("No moving", "Niet bewegen")}</button>
         <button class="gg-pill-btn${prefill.difficulty === "nmpz" ? " active" : ""}" data-v="nmpz">NMPZ</button>
-        <button class="gg-pill-btn${prefill.difficulty === "gamble" ? " active" : ""}" data-v="gamble" title="Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.">${icon("chip", { size: "sm" })} Gokken</button>
+        <button class="gg-pill-btn${prefill.difficulty === "gamble" ? " active" : ""}" data-v="gamble" title="${pick("Move freely, then bank or double your points after every round.", "Vrij bewegen, maar na elke ronde mag je je punten veilig incasseren of verdubbelen bij het rad.")}">${icon("chip", { size: "sm" })} ${pick("Gamble", "Gokken")}</button>
       </div>
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
-        <input type="checkbox" id="soloBlackWhite" ${prefill.blackwhite ? "checked" : ""} /> Zwart-wit
+        <input type="checkbox" id="soloBlackWhite" ${prefill.blackwhite ? "checked" : ""} /> ${pick("Black and white", "Zwart-wit")}
       </label>
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="ggStartSolo()">Spelen ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" onclick="ggStartSolo()">${pick("Play", "Spelen")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   initAdSlots();
   document.getElementById("soloRoundPills").addEventListener("click", (e) => {
@@ -624,7 +563,7 @@ function drawFullscreenLoading(roundLabel) {
   wrap.innerHTML = `
     <div class="gg-pano-container" style="background:var(--panel2); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;">
       <div class="ggspinner"></div>
-      <div style="color:#fff; font-size:14px; opacity:0.7;">Street View-locatie zoeken...</div>
+      <div style="color:#fff; font-size:14px; opacity:0.7;">${pick("Finding a Street View location…", "Street View-locatie zoeken…")}</div>
     </div>
     <div class="gg-hud-top">
       <button class="gg-hud-back-btn" onclick="ggExitToStart()">${icon("close", { size: "sm" })}</button>
@@ -649,7 +588,7 @@ async function loadAndDrawSoloRound() {
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
   gg.panorama = null;
 
-  drawFullscreenLoading(`Ronde ${gg.round} / ${gg.rounds}`);
+  drawFullscreenLoading(`${pick("Round", "Ronde")} ${gg.round} / ${gg.rounds}`);
   const maps = await loadGoogleMaps();
 
   let round = null, attempts = 0;
@@ -664,15 +603,15 @@ async function loadAndDrawSoloRound() {
     app.innerHTML = `${topbar()}
       <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2></div></div>
       <div class="card" style="cursor:default;">
-        ${icon("wifi", { size: "xl" })}<h3>Geen Street View gevonden</h3>
-        <p>Probeer het opnieuw.</p>
-        <button class="btn primary" onclick="ggStartSolo()" style="margin-top:10px;">Opnieuw</button>
+        ${icon("wifi", { size: "xl" })}<h3>${pick("No Street View found", "Geen Street View gevonden")}</h3>
+        <p>${pick("Please try again.", "Probeer het opnieuw.")}</p>
+        <button class="btn primary" onclick="ggStartSolo()" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
       </div>`;
     return;
   }
 
   gg.current = round;
-  drawRoundScreen({ roundLabel: `Ronde ${gg.round} / ${gg.rounds}`, scoreLabel: `${gg.totalScore} pts`, onSubmit: submitSoloGuess });
+  drawRoundScreen({ roundLabel: `${pick("Round", "Ronde")} ${gg.round} / ${gg.rounds}`, scoreLabel: `${gg.totalScore} pts`, onSubmit: submitSoloGuess });
   initPanorama(round);
   initMap(maps);
   startRoundTimer(120);
@@ -724,28 +663,28 @@ function showSoloResultOverlay(km, pts, opts = {}) {
   overlay.id = "ggResultOverlay";
   overlay.className = "gg-result-overlay";
   const statLine = km == null
-    ? `${icon("clock", { size: "sm" })} Tijd voorbij — geen gok geplaatst · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`
+    ? `${icon("clock", { size: "sm" })} ${pick("Time is up — no guess placed", "Tijd voorbij — geen gok geplaatst")} · <strong>${pts} pts</strong> · ${pick("Total", "Totaal")}: ${gg.totalScore}`
     : pending
-      ? `${icon("ruler", { size: "sm" })} ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> verdiend — nog niet ingecasseerd`
-      : `${icon("ruler", { size: "sm" })} ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> · Totaal: ${gg.totalScore}`;
+      ? `${icon("ruler", { size: "sm" })} ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> ${pick("earned — not banked yet", "verdiend — nog niet ingecasseerd")}`
+      : `${icon("ruler", { size: "sm" })} ${Math.round(km).toLocaleString()} km · <strong>${pts} pts</strong> · ${pick("Total", "Totaal")}: ${gg.totalScore}`;
   overlay.innerHTML = `
     <div class="gg-result-header">
-      <div class="gg-result-country">${gg.current.countryHint}</div>
+      <div class="gg-result-country">${countryName(gg.current.countryHint)}</div>
       <div class="gg-result-stat">${statLine}</div>
     </div>
     <div id="ggResultMap" class="gg-result-map"></div>
     ${pending ? `
     <div class="gg-wager-panel" id="ggWagerPanel">
-      <p class="small">${icon("chip", { size: "sm" })} Gokmodus: incasseer je ${pts} pts veilig, of waag ze bij het rad voor een kans op meer — of alles kwijt.</p>
+      <p class="small">${icon("chip", { size: "sm" })} ${pick(`Gamble mode: bank your ${pts} pts or risk them at the wheel for a chance to win more.`, `Gokmodus: incasseer je ${pts} pts veilig, of waag ze bij het rad voor een kans op meer — of alles kwijt.`)}</p>
       <div class="gg-wager-actions">
-        <button class="btn" onclick="ggBankPoints()">${icon("check", { size: "sm" })} Veilig incasseren (+${pts})</button>
-        <button class="btn primary" onclick="ggOpenWager()">${icon("chip", { size: "sm" })} Waag ze bij het rad</button>
+        <button class="btn" onclick="ggBankPoints()">${icon("check", { size: "sm" })} ${pick("Bank safely", "Veilig incasseren")} (+${pts})</button>
+        <button class="btn primary" onclick="ggOpenWager()">${icon("chip", { size: "sm" })} ${pick("Spin the wheel", "Waag ze bij het rad")}</button>
       </div>
     </div>` : ""}
     ${adSlotHtml("geoguesserResults")}
     <div class="gg-result-footer">
       <button class="btn primary" id="ggNextRoundBtn" style="${pending ? "display:none;" : ""}">
-        ${gg.round < gg.rounds ? `Volgende ronde ${icon("chevronRight", { size: "sm" })}` : "Bekijk eindscore"}
+        ${gg.round < gg.rounds ? `${pick("Next round", "Volgende ronde")} ${icon("chevronRight", { size: "sm" })}` : pick("View final score", "Bekijk eindscore")}
       </button>
     </div>`;
   wrap.appendChild(overlay);
@@ -781,7 +720,7 @@ function showSoloResultOverlay(km, pts, opts = {}) {
       const guessPos = { lat: gg.guess[1], lng: gg.guess[0] };
       new mapsApi.Marker({ position: guessPos, map: rmap,
         icon: { path: mapsApi.SymbolPath.CIRCLE, scale: 9, fillColor: PLAYER_COLORS[0], fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2 },
-        title: "Jouw gok" });
+        title: pick("Your guess", "Jouw gok") });
       new mapsApi.Polyline({ path: [guessPos, answerPos], map: rmap,
         strokeColor: PLAYER_COLORS[0], strokeOpacity: 0.85, strokeWeight: 2,
         icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 4 }, offset: "0", repeat: "20px" }] });
@@ -799,15 +738,15 @@ function showSoloFinalScore() {
   window.__ggSoloReplayPrefill = { rounds: savedRounds, locationSet: savedLoc };
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">Eindresultaat</div></div></div>
+    <div class="gametitle"><div><h2>${icon("pin", { size: "sm" })} GeoGuesser</h2><div class="desc">${pick("Final result", "Eindresultaat")}</div></div></div>
     <div class="card" style="cursor:default; text-align:center;">
       ${icon("flag", { size: "xl" })}
-      <h3>${gg.totalScore} / ${gg.rounds * 5000} punten</h3>
-      <p>Gemiddeld ${avg} punten per ronde.</p>
+      <h3>${gg.totalScore} / ${gg.rounds * 5000} ${pick("points", "punten")}</h3>
+      <p>${pick("Average", "Gemiddeld")} ${avg} ${pick("points per round.", "punten per ronde.")}</p>
     </div>
     <div class="guesslist" style="margin-top:14px;">
       ${gg.history.map((h, i) => `<div class="gitem">
-        <div class="name">Ronde ${i+1} · ${h.country}${h.gambled ? (h.gambleWon ? ` ${icon("chip", { size: "sm" })}${icon("check", { size: "sm" })}` : ` ${icon("chip", { size: "sm" })}${icon("close", { size: "sm" })}`) : ""}</div>
+        <div class="name">${pick("Round", "Ronde")} ${i+1} · ${countryName(h.country)}${h.gambled ? (h.gambleWon ? ` ${icon("chip", { size: "sm" })}${icon("check", { size: "sm" })}` : ` ${icon("chip", { size: "sm" })}${icon("close", { size: "sm" })}`) : ""}</div>
         <div class="dist">${h.km == null ? "—" : Math.round(h.km).toLocaleString() + " km"}</div>
         <div></div><div class="prox">${h.pts} pts</div>
       </div>`).join("")}
@@ -815,13 +754,13 @@ function showSoloFinalScore() {
     ${gg.gambleStats?.rounds > 0 ? `
     <div class="card" style="cursor:default; text-align:center; margin-top:12px;">
       ${icon("chip", { size: "xl" })}
-      <h3>${gg.gambleStats.rounds} keer gegokt</h3>
-      <p>${gg.gambleStats.staked} pts ingezet, ${gg.gambleStats.won} pts uitbetaald.</p>
+      <h3>${pick(`${gg.gambleStats.rounds} gambles`, `${gg.gambleStats.rounds} keer gegokt`)}</h3>
+      <p>${gg.gambleStats.staked} pts ${pick("staked", "ingezet")}, ${gg.gambleStats.won} pts ${pick("paid out", "uitbetaald")}.</p>
     </div>` : ""}
     ${adSlotHtml("geoguesserResults")}
     <div class="footerrow">
       <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Menu</button>
-      <button class="btn primary" onclick="ggReplaySoloSettings()">${icon("refresh", { size: "sm" })} Opnieuw spelen</button>
+      <button class="btn primary" onclick="ggReplaySoloSettings()">${icon("refresh", { size: "sm" })} ${pick("Play again", "Opnieuw spelen")}</button>
     </div>`;
   initAdSlots();
 }
@@ -859,9 +798,9 @@ async function nextStreakRound() {
     app.innerHTML = `${topbar()}
       <div class="gametitle"><div><h2>${icon("flame", { size: "sm" })} Streak</h2></div></div>
       <div class="card" style="cursor:default;">
-        ${icon("wifi", { size: "xl" })}<h3>Geen Street View gevonden</h3>
-        <p>Probeer het opnieuw.</p>
-        <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">Opnieuw</button>
+        ${icon("wifi", { size: "xl" })}<h3>${pick("No Street View found", "Geen Street View gevonden")}</h3>
+        <p>${pick("Please try again.", "Probeer het opnieuw.")}</p>
+        <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
       </div>`;
     return;
   }
@@ -881,30 +820,30 @@ function drawStreakRoundScreen() {
     <div id="ggStreetView" class="gg-pano-container"></div>
     <div class="gg-pano-loading" id="ggPanoLoading">
       <div class="ggspinner"></div>
-      <div class="gg-pano-loading-text">Panorama laden...</div>
+      <div class="gg-pano-loading-text">${pick("Loading panorama…", "Panorama laden…")}</div>
     </div>
     <div class="gg-hud-top" id="ggHudTop">
       <button class="gg-hud-back-btn" onclick="ggExitToStart()">${icon("close", { size: "sm" })}</button>
       <span class="gg-hud-pill">${icon("flame", { size: "sm" })} Streak: ${gg.streak}</span>
-      <span class="gg-hud-pill">Beste: ${gg.best}</span>
-      <button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="Zit je vast? Krijg een andere locatie.">${icon("refresh", { size: "sm" })} Andere locatie</button>
+      <span class="gg-hud-pill">${pick("Best", "Beste")}: ${gg.best}</span>
+      <button class="gg-hud-pill gg-hud-reroll" onclick="ggRerollRound()" title="${pick("Stuck? Get another location.", "Zit je vast? Krijg een andere locatie.")}">${icon("refresh", { size: "sm" })} ${pick("Another location", "Andere locatie")}</button>
     </div>
     <div class="gg-streak-panel" id="ggStreakPanel">
-      <div class="gg-map-corner-header"><span class="gg-map-guess-info">Welk land is dit?</span></div>
+      <div class="gg-map-corner-header"><span class="gg-map-guess-info">${pick("Which country is this?", "Welk land is dit?")}</span></div>
       <div style="padding:0 14px 14px; position:relative;">
-        <input id="ggStreakInput" type="text" autocomplete="off" placeholder="Typ een land..."
+        <input id="ggStreakInput" type="text" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"
           style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
         <div class="autocomplete" id="ggStreakAuto"></div>
       </div>
       <div class="gg-map-footer">
-        <button class="btn primary gg-submit-btn" id="ggSubmitBtn">${icon("pin", { size: "sm" })} Bevestig gok</button>
+        <button class="btn primary gg-submit-btn" id="ggSubmitBtn">${icon("pin", { size: "sm" })} ${pick("Confirm guess", "Bevestig gok")}</button>
       </div>
     </div>`;
   document.body.appendChild(wrap);
 
   const input = document.getElementById("ggStreakInput");
   const dd = document.getElementById("ggStreakAuto");
-  attachAutocomplete(input, dd, candidateNames(ALL_NAMES), () => {});
+  attachAutocomplete(input, dd, localizedCountryCandidates(ALL_NAMES), () => {});
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitStreakGuess(); });
   input.focus();
   document.getElementById("ggSubmitBtn").onclick = submitStreakGuess;
@@ -913,7 +852,7 @@ function drawStreakRoundScreen() {
 function submitStreakGuess() {
   if (gg.streakLocked) return;
   const input = document.getElementById("ggStreakInput");
-  const guess = findCountryByLoose(input?.value || "");
+  const guess = findCountryByAnyName(input?.value || "", ALL_NAMES);
   if (!guess) { input?.focus(); return; }
   gg.streakLocked = true;
   clearRoundTimer();
@@ -931,13 +870,13 @@ function showStreakGameOver(guess) {
   document.getElementById("ggFullscreenWrap")?.remove();
   const isNewBest = gg.streak > 0 && gg.streak >= gg.best;
   app.innerHTML = `${topbar()}
-    <div class="gametitle"><div><h2>${icon("flame", { size: "sm" })} Streak voorbij</h2></div></div>
+    <div class="gametitle"><div><h2>${icon("flame", { size: "sm" })} ${pick("Streak over", "Streak voorbij")}</h2></div></div>
     <div class="card" style="cursor:default; text-align:center;">
       ${icon("warning", { size: "xl" })}
       <h3>Streak: ${gg.streak}</h3>
-      <p>Het juiste antwoord was <strong>${gg.current.countryHint}</strong>, jij gokte <strong>${guess}</strong>.</p>
-      <p class="small">${isNewBest ? `${icon("trophy", { size: "sm" })} Nieuwe beste streak!` : `Beste streak: ${gg.best}`}</p>
-      <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">Opnieuw</button>
+      <p>${pick("The correct answer was", "Het juiste antwoord was")} <strong>${countryName(gg.current.countryHint)}</strong>, ${pick("you guessed", "jij gokte")} <strong>${countryName(guess)}</strong>.</p>
+      <p class="small">${isNewBest ? `${icon("trophy", { size: "sm" })} ${pick("New best streak!", "Nieuwe beste streak!")}` : `${pick("Best streak", "Beste streak")}: ${gg.best}`}</p>
+      <button class="btn primary" onclick="ggStartStreak()" style="margin-top:10px;">${pick("Try again", "Opnieuw")}</button>
     </div>
     ${adSlotHtml("geoguesserResults")}
     <div class="footerrow"><button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Menu</button><div></div></div>`;
@@ -967,15 +906,15 @@ function showDailyResult(result) {
   const shareText = buildDailyShareText(result);
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("calendar", { size: "sm" })} Dagelijkse challenge</h2><div class="desc">${result.date}</div></div></div>
+    <div class="gametitle"><div><h2>${icon("calendar", { size: "sm" })} ${pick("Daily challenge", "Dagelijkse challenge")}</h2><div class="desc">${result.date}</div></div></div>
     <div class="card" style="cursor:default; text-align:center;">
       ${icon("flag", { size: "xl" })}
-      <h3>${result.totalScore} / ${result.rounds * 5000} punten</h3>
-      <button class="btn primary" id="ggDailyCopyBtn" style="margin-top:10px;">${icon("clipboard", { size: "sm" })} Kopieer resultaat</button>
+      <h3>${result.totalScore} / ${result.rounds * 5000} ${pick("points", "punten")}</h3>
+      <button class="btn primary" id="ggDailyCopyBtn" style="margin-top:10px;">${icon("clipboard", { size: "sm" })} ${pick("Copy result", "Kopieer resultaat")}</button>
     </div>
     <div class="guesslist" style="margin-top:14px;">
       ${result.history.map((h, i) => `<div class="gitem">
-        <div class="name">Ronde ${i+1} · ${h.country}</div>
+        <div class="name">${pick("Round", "Ronde")} ${i+1} · ${countryName(h.country)}</div>
         <div class="dist">${Math.round(h.km).toLocaleString()} km</div>
         <div></div><div class="prox">${h.pts} pts</div>
       </div>`).join("")}
@@ -987,8 +926,8 @@ function showDailyResult(result) {
   if (copyBtn) {
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(shareText).catch(() => {});
-      copyBtn.innerHTML = `${icon("check", { size: "sm" })} Gekopieerd!`;
-      setTimeout(() => { copyBtn.innerHTML = `${icon("clipboard", { size: "sm" })} Kopieer resultaat`; }, 2000);
+      copyBtn.innerHTML = `${icon("check", { size: "sm" })} ${pick("Copied!", "Gekopieerd!")}`;
+      setTimeout(() => { copyBtn.innerHTML = `${icon("clipboard", { size: "sm" })} ${pick("Copy result", "Kopieer resultaat")}`; }, 2000);
     };
   }
 }
@@ -1000,17 +939,17 @@ window.ggShowMultiplayerMenu = function () {
   setUrlPath("/geoguesser/multiplayer");
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} GeoGuesser multiplayer</h2><div class="desc">Speel dezelfde rondes tegelijk met vrienden.</div></div></div>
-    <div class="card" style="cursor:pointer;" onclick="ggShowMpHostSettings()">
-      ${icon("plus", { size: "lg" })}<h3>Lobby hosten</h3>
-      <p>Stel de spelmodus en instellingen in, maak een kamer aan en deel de code.</p>
-    </div>
-    <div class="card" style="cursor:pointer; margin-top:12px;" onclick="ggShowMpJoin()">
-      ${icon("key", { size: "lg" })}<h3>Lobby joinen</h3>
-      <p>Heb je een code van een vriend gekregen? Vul 'm hier in.</p>
-    </div>
+    <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} GeoGuesser multiplayer</h2><div class="desc">${pick("Play the same rounds with friends in real time.", "Speel dezelfde rondes tegelijk met vrienden.")}</div></div></div>
+    <div class="game-mode-grid"><button type="button" class="card game-mode-card" onclick="ggShowMpHostSettings()">
+      ${icon("plus", { size: "lg" })}<h3>${pick("Host a lobby", "Lobby hosten")}</h3>
+      <p>${pick("Choose the mode and settings, create a room and share the code.", "Stel de spelmodus en instellingen in, maak een kamer aan en deel de code.")}</p>
+    </button>
+    <button type="button" class="card game-mode-card" onclick="ggShowMpJoin()">
+      ${icon("key", { size: "lg" })}<h3>${pick("Join a lobby", "Lobby joinen")}</h3>
+      <p>${pick("Enter the code you received from a friend.", "Vul hier de code in die je van een vriend kreeg.")}</p>
+    </button></div>
     <div class="footerrow">
-      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} Terug</button><div></div>
+      <button class="btn" onclick="ggShowStart()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
     </div>`;
 };
 
@@ -1018,32 +957,32 @@ window.ggShowMpHostSettings = function (prefill = {}) {
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} Lobby hosten</h2><div class="desc">Stel je lobby in en maak 'm aan.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("plus", { size: "sm" })} ${pick("Host a lobby", "Lobby hosten")}</h2><div class="desc">${pick("Configure your lobby and create it.", "Stel je lobby in en maak 'm aan.")}</div></div></div>
     <div class="card" style="cursor:default;">
-      <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || getProfile().name || ''}"
+      <h3 style="margin-bottom:10px;">${pick("Your name", "Jouw naam")}</h3>
+      <input id="ggNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${prefill.name || getProfile().name || ''}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; margin-top:12px;">
-      <h3 style="margin-bottom:14px;">${icon("gear", { size: "sm" })} Lobby-instellingen</h3>
-      <label class="gg-label">Spelmodus</label>
+      <h3 style="margin-bottom:14px;">${icon("gear", { size: "sm" })} ${pick("Lobby settings", "Lobby-instellingen")}</h3>
+      <label class="gg-label">${pick("Game mode", "Spelmodus")}</label>
       <div class="gg-select-wrap"><select id="mpGameMode" class="gg-select">${gameModeOptionsHtml(prefill.gameMode || "ffa")}</select></div>
-      <label class="gg-label" style="margin-top:16px;">Aantal rondes</label>
+      <label class="gg-label" style="margin-top:16px;">${pick("Number of rounds", "Aantal rondes")}</label>
       <div class="gg-pill-row" id="mpRoundPills">
-        ${[3,5,7,10,'∞'].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n === '∞' ? 'Tot dood' : n}</button>`).join("")}
+        ${[3,5,7,10,'∞'].map(n => `<button class="gg-pill-btn${n===ar?" active":""}" data-v="${n}">${n === '∞' ? pick('Until eliminated', 'Tot dood') : n}</button>`).join("")}
       </div>
-      <label class="gg-label" style="margin-top:16px;">Locaties</label>
+      <label class="gg-label" style="margin-top:16px;">${pick("Locations", "Locaties")}</label>
       ${locationSettingHtml("mp", prefill.locationSet)}
       ${difficultySettingHtml("mp", prefill.difficulty, prefill.blackwhite)}
       ${timerSettingHtml("mp", prefill.roundTime || null)}
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; cursor:pointer;">
-        <input type="checkbox" id="mpPowerups" ${prefill.powerups !== false ? "checked" : ""} /> Powerups & sabotages aan
+        <input type="checkbox" id="mpPowerups" ${prefill.powerups !== false ? "checked" : ""} /> ${pick("Enable power-ups and sabotage", "Powerups & sabotages aan")}
       </label>
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button>
-      <button class="btn primary" onclick="ggHostLobby()">Kamer aanmaken ${icon("chevronRight", { size: "sm" })}</button>
+      <button class="btn" onclick="ggShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button>
+      <button class="btn primary" onclick="ggHostLobby()">${pick("Create room", "Kamer aanmaken")} ${icon("chevronRight", { size: "sm" })}</button>
     </div>`;
   initAdSlots();
   document.getElementById("mpRoundPills").addEventListener("click", (e) => {
@@ -1061,22 +1000,22 @@ window.ggShowMpJoin = function (prefill = {}) {
   const codeLen = 4;
   app.innerHTML = `
     ${topbar()}
-    <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} Lobby joinen</h2><div class="desc">Vul de code in die je hebt gekregen.</div></div></div>
+    <div class="gametitle"><div><h2>${icon("key", { size: "sm" })} ${pick("Join a lobby", "Lobby joinen")}</h2><div class="desc">${pick("Enter the code you received.", "Vul de code in die je hebt gekregen.")}</div></div></div>
     <div class="card" style="cursor:default;">
-      <h3 style="margin-bottom:10px;">Jouw naam</h3>
-      <input id="ggNameInput" type="text" placeholder="Typ je naam..." maxlength="18" value="${prefill.name || getProfile().name || ''}"
+      <h3 style="margin-bottom:10px;">${pick("Your name", "Jouw naam")}</h3>
+      <input id="ggNameInput" type="text" placeholder="${pick("Enter your name…", "Typ je naam…")}" maxlength="18" value="${prefill.name || getProfile().name || ''}"
         style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel2); color:inherit; font-size:14px;" />
     </div>
     <div class="card" style="cursor:default; text-align:center; margin-top:12px;">
-      <h3 style="margin-bottom:16px;">Lobby-code</h3>
+      <h3 style="margin-bottom:16px;">${pick("Lobby code", "Lobby-code")}</h3>
       <div class="gg-code-boxes" id="ggCodeBoxes">
         ${Array.from({ length: codeLen }, (_, i) => `<input class="gg-code-box" maxlength="1" data-i="${i}" autocomplete="off" />`).join("")}
       </div>
-      <button class="btn primary" id="ggJoinBtn" style="margin-top:20px; width:100%;">Join</button>
+      <button class="btn primary" id="ggJoinBtn" style="margin-top:20px; width:100%;">${pick("Join", "Meedoen")}</button>
     </div>
     ${adSlotHtml("geoguesserSettings")}
     <div class="footerrow">
-      <button class="btn" onclick="ggShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} Terug</button><div></div>
+      <button class="btn" onclick="ggShowMultiplayerMenu()">${icon("chevronLeft", { size: "sm" })} ${pick("Back", "Terug")}</button><div></div>
     </div>`;
   initAdSlots();
 
@@ -1103,7 +1042,7 @@ window.ggShowMpJoin = function (prefill = {}) {
 
 function ggSubmitMpJoin() {
   const code = Array.from(document.querySelectorAll(".gg-code-box")).map((b) => b.value).join("");
-  if (code.length < 4) { alert("Vul een geldige lobby-code van 4 tekens in."); return; }
+  if (code.length < 4) { alert(pick("Enter a valid 4-character lobby code.", "Vul een geldige lobby-code van 4 tekens in.")); return; }
   window.ggJoinLobby(code);
 }
 
@@ -1114,7 +1053,7 @@ function getPlayerName() {
     const p = getProfile();
     if (p.name !== name) saveProfile({ ...p, name });
   }
-  return name || "Speler" + Math.floor(Math.random() * 900 + 100);
+  return name || pick("Player", "Speler") + Math.floor(Math.random() * 900 + 100);
 }
 
 function getMpSettings() {

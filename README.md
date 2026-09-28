@@ -1,16 +1,17 @@
 # GlobeGames
 
-Vier geografie-mini-games in één Vite-app: GeoHunt, Vorm Raden, GlobeGuess en GeoGuesser (nu met echte
-Google Street View en live multiplayer).
+Five geography mini-games in one Vite app: GeoHunt, Shape Guess, GlobeGuess, GeoGuesser (with real
+Google Street View and live multiplayer), and WikiSpeedrun. English is the default interface language;
+players can switch to Dutch from the header or account settings.
 
-## Lokaal draaien
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-## GeoGuesser instellen
+## Configure GeoGuesser
 
 ### 1. Google Street View (verplicht)
 
@@ -47,6 +48,17 @@ VITE_SUPABASE_ANON_KEY=jouw-anon-key
 Zonder deze twee variabelen werkt GeoGuesser gewoon solo — de multiplayer-knop verschijnt dan niet.
 
 Zie `.env.example` voor alle variabelen samen.
+
+### 3. Email and Google sign-in
+
+The account page uses the same Supabase project. In the Supabase dashboard:
+
+1. Enable **Email** and **Google** under Authentication → Providers.
+2. Add your Google OAuth client ID and secret to the Google provider.
+3. Add the local and production URLs under Authentication → URL Configuration, for example
+   `http://localhost:5173/**` and `https://globegames.vercel.app/**`.
+
+No extra frontend environment variables are required beyond the Supabase URL and anon key above.
 
 ## Deployen
 

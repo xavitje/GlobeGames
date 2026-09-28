@@ -1,19 +1,13 @@
-import { createClient } from "@supabase/supabase-js";
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+import { getSupabase, hasSupabaseConfig } from "./supabase.js";
 const ROOM_PREFIX = "globegames-gg-";
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-let client = null;
-
 export function hasMultiplayerConfig() {
-  return !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+  return hasSupabaseConfig();
 }
 
 function getClient() {
-  if (!client) client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return client;
+  return getSupabase();
 }
 
 export function randomRoomCode() {

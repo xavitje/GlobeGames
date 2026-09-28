@@ -1,1 +1,141 @@
-import{COUNTRY_DATA}from"../data/countries.js";import{ALL_NAMES,flagEmoji,findCountryByLoose,attachAutocomplete,candidateNames,topbar,icon}from"../core.js";import{adSlotHtml,initAdSlots}from"../lib/ads.js";const CRITERIA_POOL=[{id:"eu",label:"EU-LIDSTAAT",test:c=>c.e},{id:"olympics",label:"HEEFT DE OLYMPISCHE\nSPELEN GEHOST",test:c=>c.o},{id:"vowel",label:"NAAM BEGINT MET\nEEN KLINKER",test:c=>c.v},{id:"gb",label:"VOORMALIGE BRITSE\nKOLONIE",test:c=>c.b},{id:"landlocked",label:"LAND ZONDER\nZEETOEGANG",test:c=>c.l},{id:"green",label:"VLAG BEVAT GROEN",test:c=>c.f.includes("g")},{id:"red",label:"VLAG BEVAT ROOD",test:c=>c.f.includes("r")},{id:"blue",label:"VLAG BEVAT BLAUW",test:c=>c.f.includes("b")},{id:"yellow",label:"VLAG BEVAT GEEL",test:c=>c.f.includes("y")},{id:"white",label:"VLAG BEVAT WIT",test:c=>c.f.includes("w")},{id:"black",label:"VLAG BEVAT ZWART",test:c=>c.f.includes("k")},{id:"africa",label:"LIGT IN AFRIKA",test:c=>"AF"===c.c},{id:"asia",label:"LIGT IN AZIË",test:c=>"AS"===c.c},{id:"europe",label:"LIGT IN EUROPA",test:c=>"EU"===c.c},{id:"samerica",label:"LIGT IN ZUID-AMERIKA",test:c=>"SA"===c.c},{id:"namerica",label:"LIGT IN NOORD-AMERIKA",test:c=>"NA"===c.c},{id:"oceania",label:"LIGT IN OCEANIË",test:c=>"OC"===c.c}];const GH_DIFFICULTIES=[{key:"makkelijk",label:"Makkelijk",mistakes:9},{key:"normaal",label:"Normaal",mistakes:6},{key:"moeilijk",label:"Moeilijk",mistakes:3}];function ghGetDifficulty(){const saved=localStorage.getItem("gg_geohunt_difficulty");return GH_DIFFICULTIES.find(d=>d.key===saved)||GH_DIFFICULTIES[1]}let app,gh=null;export function renderGeoHunt(rootEl){app=rootEl;const board=function(){for(let attempt=0;attempt<400;attempt++){const pool=[...CRITERIA_POOL].sort(()=>Math.random()-.5),rows=pool.slice(0,3),cols=pool.slice(3,6),valid={};let ok=!0;for(let r=0;r<3;r++){for(let c=0;c<3;c++){const list=ALL_NAMES.filter(n=>rows[r].test(COUNTRY_DATA[n])&&cols[c].test(COUNTRY_DATA[n]));if(0===list.length){ok=!1;break}valid[r+"-"+c]=list}if(!ok)break}if(ok)return{rows:rows,cols:cols,valid:valid}}return null}();const diff=ghGetDifficulty();gh={board:board,filled:{},used:new Set,mistakes:diff.mistakes,maxMistakes:diff.mistakes,difficulty:diff.key,score:0,activeCell:null,over:!1},draw()}function draw(){const{rows:rows,cols:cols,valid:valid}=gh.board,cellHtml=(r,c)=>{const key=r+"-"+c,f=gh.filled[key];return f?`<div class="gcell filled">\n        <div class="flagemoji">${flagEmoji(f.iso2)}</div>\n        <div>${f.name}</div>\n        <div class="pts ${f.rare?"rare":""}">${f.pts} pts</div>\n      </div>`:`<div class="gcell answer" onclick="ghOpenCell(${r},${c})" id="cell-${key}"></div>`};app.innerHTML=`\n    ${topbar()}\n    <div class="gametitle">\n      <div><h2>${icon("grid",{size:"sm"})} GeoHunt</h2><div class="desc">Vul elk vakje met een land dat aan de rij- én kolomcriteria voldoet.</div></div>\n      <div class="pillrow"><span class="pill">Board 1</span><select class="pill-select" id="ghDifficultySelect" onchange="ghChangeDifficulty(this.value)">${GH_DIFFICULTIES.map(d=>`<option value="${d.key}" ${d.key===gh.difficulty?"selected":""}>${d.label}</option>`).join("")}</select></div>\n    </div>\n\n    <div id="inputzone"></div>\n\n    <div class="grid3">\n      <div class="gcell corner"><span class="big" id="ghMistakesNum">${gh.mistakes}</span><div class="small">van ${gh.maxMistakes} fouten over</div></div>\n      <div class="gcell criteria">${cols[0].label}</div>\n      <div class="gcell criteria">${cols[1].label}</div>\n      <div class="gcell criteria">${cols[2].label}</div>\n\n      <div class="gcell criteria">${rows[0].label}</div>\n      ${cellHtml(0,0)}${cellHtml(0,1)}${cellHtml(0,2)}\n\n      <div class="gcell criteria">${rows[1].label}</div>\n      ${cellHtml(1,0)}${cellHtml(1,1)}${cellHtml(1,2)}\n\n      <div class="gcell criteria">${rows[2].label}</div>\n      ${cellHtml(2,0)}${cellHtml(2,1)}${cellHtml(2,2)}\n    </div>\n\n    <div class="footerrow">\n      <div class="scorebox"><span class="lbl">Score</span><span class="val">${gh.score}</span></div>\n      <button class="btn" onclick="ghNewGame()">${icon("refresh",{size:"sm"})} Nieuw spel</button>\n    </div>\n    ${adSlotHtml("geohuntBoard")}\n  `,initAdSlots()}function ghSubmit(){if(gh.over||!gh.activeCell)return;const input=document.getElementById("ghInput"),msg=document.getElementById("ghMsg"),[r,c]=gh.activeCell,key=r+"-"+c,name=findCountryByLoose(input.value||"");function fail(text){msg.className="msg bad",msg.textContent=text,gh.mistakes--;const counter=document.getElementById("ghMistakesNum");counter&&(counter.textContent=gh.mistakes),gh.mistakes<=0&&ghEndGame(!1)}if(!name)return void fail("Onbekend land. Probeer opnieuw.");if(gh.used.has(name))return void fail(`${name} is al gebruikt op het bord.`);const{rows:rows,cols:cols,valid:valid}=gh.board;if(!rows[r].test(COUNTRY_DATA[name])||!cols[c].test(COUNTRY_DATA[name]))return void fail(`${name} voldoet niet aan beide criteria.`);const count=valid[key].length,pts=function(count){return Math.max(4,Math.min(99,Math.round(140/count)))}(count);gh.filled[key]={name:name,pts:pts,rare:count<=2,iso2:COUNTRY_DATA[name].i},gh.used.add(name),gh.score+=pts,document.getElementById("inputzone").innerHTML="",gh.activeCell=null,9!==Object.keys(gh.filled).length?draw():ghEndGame(!0)}function ghEndGame(won){gh.over=!0,draw();const box=document.createElement("div");box.className="overlay",box.innerHTML=`<div class="overlaybox">\n    <h3>${won?icon("check",{size:"sm"})+" Bord compleet!":icon("warning",{size:"sm"})+" Geen fouten meer over"}</h3>\n    <p>Eindscore: <strong>${gh.score}</strong> punten</p>\n    ${adSlotHtml("geohuntBoard")}\n    <button class="btn primary" onclick="this.closest('.overlay').remove(); ghNewGame();">Nieuw spel</button>\n  </div>`,document.body.appendChild(box),initAdSlots()}window.ghOpenCell=function(r,c){if(gh.over)return;gh.activeCell=[r,c],document.getElementById("inputzone").innerHTML='\n    <div class="inputrow">\n      <input id="ghInput" autocomplete="off" placeholder="Typ een landnaam..." />\n      <div class="autocomplete" id="ghAuto"></div>\n      <button onclick="ghSubmit()">Gok</button>\n    </div>\n    <div class="msg" id="ghMsg"></div>\n  ';const input=document.getElementById("ghInput"),dd=document.getElementById("ghAuto");attachAutocomplete(input,dd,candidateNames(ALL_NAMES.filter(n=>!gh.used.has(n))),()=>{}),input.focus(),input.addEventListener("keydown",e=>{"Enter"===e.key&&ghSubmit()})},window.ghSubmit=ghSubmit,window.ghNewGame=function(){renderGeoHunt(app)},window.ghChangeDifficulty=function(key){localStorage.setItem("gg_geohunt_difficulty",key),renderGeoHunt(app)};
+import { COUNTRY_DATA } from "../data/countries.js";
+import { ALL_NAMES, flagEmoji, attachAutocomplete, icon } from "../core.js";
+import { topbar } from "../lib/layout.js";
+import { countryName, findCountryByAnyName, localizedCountryCandidates, pick } from "../lib/i18n.js";
+import { adSlotHtml, initAdSlots } from "../lib/ads.js";
+
+const CRITERIA_POOL = [
+  { id: "eu", en: "EU MEMBER", nl: "EU-LIDSTAAT", test: (c) => c.e },
+  { id: "olympics", en: "HOSTED THE OLYMPIC\nGAMES", nl: "HEEFT DE OLYMPISCHE\nSPELEN GEHOST", test: (c) => c.o },
+  { id: "vowel", en: "NAME STARTS WITH\nA VOWEL", nl: "NAAM BEGINT MET\nEEN KLINKER", test: (c) => c.v },
+  { id: "gb", en: "FORMER BRITISH\nCOLONY", nl: "VOORMALIGE BRITSE\nKOLONIE", test: (c) => c.b },
+  { id: "landlocked", en: "LANDLOCKED", nl: "LAND ZONDER\nZEETOEGANG", test: (c) => c.l },
+  { id: "green", en: "FLAG HAS GREEN", nl: "VLAG BEVAT GROEN", test: (c) => c.f.includes("g") },
+  { id: "red", en: "FLAG HAS RED", nl: "VLAG BEVAT ROOD", test: (c) => c.f.includes("r") },
+  { id: "blue", en: "FLAG HAS BLUE", nl: "VLAG BEVAT BLAUW", test: (c) => c.f.includes("b") },
+  { id: "yellow", en: "FLAG HAS YELLOW", nl: "VLAG BEVAT GEEL", test: (c) => c.f.includes("y") },
+  { id: "white", en: "FLAG HAS WHITE", nl: "VLAG BEVAT WIT", test: (c) => c.f.includes("w") },
+  { id: "black", en: "FLAG HAS BLACK", nl: "VLAG BEVAT ZWART", test: (c) => c.f.includes("k") },
+  { id: "africa", en: "IN AFRICA", nl: "LIGT IN AFRIKA", test: (c) => c.c === "AF" },
+  { id: "asia", en: "IN ASIA", nl: "LIGT IN AZIË", test: (c) => c.c === "AS" },
+  { id: "europe", en: "IN EUROPE", nl: "LIGT IN EUROPA", test: (c) => c.c === "EU" },
+  { id: "samerica", en: "IN SOUTH AMERICA", nl: "LIGT IN ZUID-AMERIKA", test: (c) => c.c === "SA" },
+  { id: "namerica", en: "IN NORTH AMERICA", nl: "LIGT IN NOORD-AMERIKA", test: (c) => c.c === "NA" },
+  { id: "oceania", en: "IN OCEANIA", nl: "LIGT IN OCEANIË", test: (c) => c.c === "OC" },
+];
+
+const DIFFICULTIES = [
+  { key: "easy", en: "Easy", nl: "Makkelijk", mistakes: 9 },
+  { key: "normal", en: "Normal", nl: "Normaal", mistakes: 6 },
+  { key: "hard", en: "Hard", nl: "Moeilijk", mistakes: 3 },
+];
+
+let app;
+let game;
+
+const criterionLabel = (criterion) => pick(criterion.en, criterion.nl).replace("\n", "<br>");
+const difficultyLabel = (difficulty) => pick(difficulty.en, difficulty.nl);
+
+function currentDifficulty() {
+  const saved = localStorage.getItem("gg_geohunt_difficulty");
+  return DIFFICULTIES.find((item) => item.key === saved) || DIFFICULTIES[1];
+}
+
+function createBoard() {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const pool = [...CRITERIA_POOL].sort(() => Math.random() - 0.5);
+    const rows = pool.slice(0, 3);
+    const cols = pool.slice(3, 6);
+    const valid = {};
+    let possible = true;
+    for (let row = 0; row < 3 && possible; row++) {
+      for (let col = 0; col < 3; col++) {
+        const matches = ALL_NAMES.filter((name) => rows[row].test(COUNTRY_DATA[name]) && cols[col].test(COUNTRY_DATA[name]));
+        if (!matches.length) { possible = false; break; }
+        valid[`${row}-${col}`] = matches;
+      }
+    }
+    if (possible) return { rows, cols, valid };
+  }
+  throw new Error("Could not generate a valid board.");
+}
+
+export function renderGeoHunt(rootElement) {
+  app = rootElement;
+  const difficulty = currentDifficulty();
+  game = { board: createBoard(), filled: {}, used: new Set(), mistakes: difficulty.mistakes, maxMistakes: difficulty.mistakes, difficulty: difficulty.key, score: 0, activeCell: null, over: false };
+  draw();
+}
+
+function draw() {
+  const { rows, cols } = game.board;
+  const cell = (row, col) => {
+    const key = `${row}-${col}`;
+    const answer = game.filled[key];
+    if (answer) return `<div class="gcell filled"><div class="flagemoji">${flagEmoji(answer.iso2)}</div><div>${countryName(answer.name)}</div><div class="pts ${answer.rare ? "rare" : ""}">${answer.pts} pts</div></div>`;
+    return `<button type="button" class="gcell answer" onclick="ghOpenCell(${row},${col})" id="cell-${key}" aria-label="${pick("Answer cell", "Antwoordvak")}"></button>`;
+  };
+  app.innerHTML = `${topbar()}
+    <div class="gametitle"><div><h2>${icon("grid", { size: "sm" })} GeoHunt</h2><div class="desc">${pick("Fill every cell with a country that matches its row and column clues.", "Vul elk vakje met een land dat aan de rij- én kolomcriteria voldoet.")}</div></div>
+      <div class="pillrow"><span class="pill">${pick("Board", "Bord")} 1</span><select class="pill-select" aria-label="${pick("Difficulty", "Moeilijkheid")}" onchange="ghChangeDifficulty(this.value)">${DIFFICULTIES.map((item) => `<option value="${item.key}" ${item.key === game.difficulty ? "selected" : ""}>${difficultyLabel(item)}</option>`).join("")}</select></div></div>
+    <div id="inputzone"></div>
+    <div class="grid3">
+      <div class="gcell corner"><span class="big" id="ghMistakesNum">${game.mistakes}</span><div class="small">${pick(`of ${game.maxMistakes} mistakes left`, `van ${game.maxMistakes} fouten over`)}</div></div>
+      ${cols.map((item) => `<div class="gcell criteria">${criterionLabel(item)}</div>`).join("")}
+      <div class="gcell criteria">${criterionLabel(rows[0])}</div>${cell(0, 0)}${cell(0, 1)}${cell(0, 2)}
+      <div class="gcell criteria">${criterionLabel(rows[1])}</div>${cell(1, 0)}${cell(1, 1)}${cell(1, 2)}
+      <div class="gcell criteria">${criterionLabel(rows[2])}</div>${cell(2, 0)}${cell(2, 1)}${cell(2, 2)}
+    </div>
+    <div class="footerrow"><div class="scorebox"><span class="lbl">Score</span><span class="val">${game.score}</span></div><button class="btn" onclick="ghNewGame()">${icon("refresh", { size: "sm" })} ${pick("New game", "Nieuw spel")}</button></div>
+    ${adSlotHtml("geohuntBoard")}`;
+  initAdSlots();
+}
+
+function submit() {
+  if (game.over || !game.activeCell) return;
+  const input = document.getElementById("ghInput");
+  const message = document.getElementById("ghMsg");
+  const [row, col] = game.activeCell;
+  const key = `${row}-${col}`;
+  const name = findCountryByAnyName(input.value, ALL_NAMES);
+  const fail = (text) => {
+    message.className = "msg bad";
+    message.textContent = text;
+    game.mistakes--;
+    document.getElementById("ghMistakesNum").textContent = game.mistakes;
+    if (game.mistakes <= 0) endGame(false);
+  };
+  if (!name) return fail(pick("Unknown country. Try again.", "Onbekend land. Probeer opnieuw."));
+  if (game.used.has(name)) return fail(pick(`${countryName(name)} is already on the board.`, `${countryName(name)} is al gebruikt op het bord.`));
+  const { rows, cols, valid } = game.board;
+  if (!rows[row].test(COUNTRY_DATA[name]) || !cols[col].test(COUNTRY_DATA[name])) return fail(pick(`${countryName(name)} does not match both clues.`, `${countryName(name)} voldoet niet aan beide criteria.`));
+  const count = valid[key].length;
+  const points = Math.max(4, Math.min(99, Math.round(140 / count)));
+  game.filled[key] = { name, pts: points, rare: count <= 2, iso2: COUNTRY_DATA[name].i };
+  game.used.add(name);
+  game.score += points;
+  game.activeCell = null;
+  if (Object.keys(game.filled).length === 9) endGame(true); else draw();
+}
+
+function endGame(won) {
+  game.over = true;
+  draw();
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.innerHTML = `<div class="overlaybox"><h3>${won ? icon("check", { size: "sm" }) + " " + pick("Board complete!", "Bord compleet!") : icon("warning", { size: "sm" }) + " " + pick("No mistakes left", "Geen fouten meer over")}</h3><p>${pick("Final score", "Eindscore")}: <strong>${game.score}</strong> ${pick("points", "punten")}</p><button class="btn primary" onclick="this.closest('.overlay').remove();ghNewGame();">${pick("New game", "Nieuw spel")}</button></div>`;
+  document.body.appendChild(overlay);
+}
+
+window.ghOpenCell = (row, col) => {
+  if (game.over) return;
+  game.activeCell = [row, col];
+  document.getElementById("inputzone").innerHTML = `<div class="inputrow"><input id="ghInput" autocomplete="off" placeholder="${pick("Type a country…", "Typ een land…")}"><div class="autocomplete" id="ghAuto"></div><button onclick="ghSubmit()">${pick("Submit", "Gok")}</button></div><div class="msg" id="ghMsg"></div>`;
+  const input = document.getElementById("ghInput");
+  attachAutocomplete(input, document.getElementById("ghAuto"), localizedCountryCandidates(ALL_NAMES.filter((name) => !game.used.has(name))), () => {});
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
+  input.focus();
+};
+window.ghSubmit = submit;
+window.ghNewGame = () => renderGeoHunt(app);
+window.ghChangeDifficulty = (key) => { localStorage.setItem("gg_geohunt_difficulty", key); renderGeoHunt(app); };
