@@ -33,8 +33,9 @@ Google geeft $200 gratis tegoed per maand — voor spelen met een paar vrienden 
 
 ### 2. Multiplayer (optioneel)
 
-Multiplayer gebruikt een gratis [Supabase](https://supabase.com/)-project voor realtime synchronisatie
-(geen database-tabellen nodig, alleen Realtime broadcast/presence).
+Multiplayer gebruikt een gratis [Supabase](https://supabase.com/)-project. Realtime verzorgt lobby-aanwezigheid
+en snelle schermupdates; de `multiplayer-action` Edge Function valideert spelers, rondes, scores, wagers,
+power-ups en sabotages. De database bewaart daarbij de officiële matchstatus achter RLS.
 
 1. Maak een gratis Supabase-project aan.
 2. Kopieer de **Project URL** en **anon/public key** (Settings → API).
@@ -46,6 +47,18 @@ VITE_SUPABASE_ANON_KEY=jouw-anon-key
 ```
 
 Zonder deze twee variabelen werkt GeoGuesser gewoon solo — de multiplayer-knop verschijnt dan niet.
+
+GeoGuesser multiplayer vereist een ingelogd account. Database- en Function-wijzigingen worden uitgerold met:
+
+```bash
+npx supabase login
+npx supabase link --project-ref jouw-project-ref
+npx supabase db push
+npx supabase functions deploy multiplayer-action --no-verify-jwt
+```
+
+De Function controleert het bearer-token zelf en gebruikt de service-role key uitsluitend binnen Supabase.
+Zet die key nooit in een `VITE_`-variabele of in de browsercode.
 
 Zie `.env.example` voor alle variabelen samen.
 

@@ -11,6 +11,7 @@ export class AppRouter {
     this.activeCleanup = null;
     this.handlePopState = () => this.render(true);
     this.handleLinkClick = (event) => {
+      if (event.defaultPrevented) return;
       const link = event.target.closest("a[href]");
       if (!link || link.target || link.hasAttribute("download")) return;
       const url = new URL(link.href, location.href);

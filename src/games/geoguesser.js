@@ -2,7 +2,7 @@ import { ALL_NAMES, haversineKm, attachAutocomplete, icon, PLAYER_COLORS } from 
 import { topbar } from "../lib/layout.js";
 import { countryName, findCountryByAnyName, getLanguage, localizedCountryCandidates, pick } from "../lib/i18n.js";
 import { buildDailyShareText, getDailyKey, getDailyResult, getStreakBest, hashStringToSeed, mulberry32, saveDailyResult, scoreForDistance, setStreakBest } from "./geoguesser/challenge-utils.js";
-import { bonusLabel, randomPowerup, randomSabotage } from "./geoguesser/bonuses.js";
+import { bonusLabel } from "./geoguesser/bonuses.js";
 import {
   hasGoogleMapsKey,
   loadGoogleMaps,
@@ -13,12 +13,13 @@ import {
   hasMultiplayerConfig,
   GameRoom,
   randomRoomCode,
-  randomPlayerId,
 } from "../lib/multiplayer.js";
 import { getProfile, saveProfile } from "../lib/profile.js";
 import { adSlotHtml, initAdSlots } from "../lib/ads.js";
 import { escapeHtml } from "../lib/html.js";
 import { ActionController } from "../lib/actions.js";
+import { getSession } from "../lib/auth.js";
+import { MultiplayerServer } from "../lib/multiplayer-server.js";
 import { buildPointFn, difficultySettingHtml, locationSetLabel, locationSettingHtml, readDifficultySetting, readLocationSetting, readTimerSetting, timerSettingHtml, wireDifficultySetting, wireLocationSetting, wireTimerSetting } from "./geoguesser/settings.js";
 
 let app;
@@ -953,10 +954,31 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${code.toUpperCase()}</h2><div class="desc">Verbinden...</div></div></div>
     <div class="ggphoto-wrap loading"><div class="ggspinner"></div></div>`;
 
-  const playerId = existingPlayerId || randomPlayerId();
-  const room = new GameRoom(code, playerId, name);
+  const server = new MultiplayerServer(code);
+  let registration;
+  try {
+    const session = await getSession();
+    if (!session) throw new Error(pick("Sign in before joining multiplayer.", "Log in voordat je multiplayer speelt."));
+    registration = isHost && !existingPlayerId
+      ? await server.createRoom(name, settings || {})
+      : await server.joinRoom(name);
+  } catch (error) {
+    app.innerHTML = `${topbar()}
+      <div class="card" style="cursor:default; text-align:center;">
+        ${icon("lockClosed", { size: "xl" })}<h3>${pick("Sign-in required", "Inloggen vereist")}</h3>
+        <p>${escapeHtml(error.message)}</p>
+        <a class="btn primary" href="/account" style="margin-top:10px;">${pick("Go to account", "Naar account")}</a>
+      </div>`;
+    return;
+  }
 
-  gg = { mode: "mp", room, isHost, playerId, name, round: 0,
+  const playerId = registration.player.playerId;
+  const room = new GameRoom(code, playerId, registration.player.name);
+  isHost = registration.isHost;
+  name = registration.player.name;
+  if (!settings) settings = registration.match.settings || {};
+
+  gg = { mode: "mp", room, server, isHost, playerId, name, round: 0,
     rounds: settings?.rounds ?? 5, locationSet: settings?.locationSet ?? "world",
     roundTime: settings?.roundTime ?? null,
     difficulty: settings?.difficulty ?? "free", blackwhite: settings?.blackwhite ?? false,
@@ -989,7 +1011,6 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
   room.on("teams", onMpTeamsReceived);
   room.on("chat", onMpChatReceived);
   room.on("resync", onMpResyncRequest);
-  room.on("wager", onMpWagerReceived);
   room.on("scoreupdate", onMpScoreUpdateReceived);
   room.on("sabotage", onMpSabotageReceived);
 
@@ -1258,7 +1279,7 @@ function onMpResyncRequest() {
   }
 }
 
-const ggMpStartGame = function () {
+const ggMpStartGame = async function () {
   if (!gg.isHost) return;
   const canStart = checkCanStartGame();
   if (!canStart.ok) { alert(canStart.reason); return; }
@@ -1279,7 +1300,19 @@ const ggMpStartGame = function () {
     gg.eliminated = [];
   }
 
-  gg.room.send("settings", { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite, powerups: gg.powerups });
+  const settings = { rounds: gg.rounds, locationSet: gg.locationSet, roundTime: gg.roundTime, gameMode: gg.gameMode, difficulty: gg.difficulty, blackwhite: gg.blackwhite, powerups: gg.powerups };
+  try {
+    const result = await gg.server.startMatch(settings, gg.teams);
+    gg.scoreboard = result.match.state.scoreboard || gg.scoreboard;
+    gg.hp = result.match.state.hp || gg.hp;
+    gg.teamHp = result.match.state.teamHp || gg.teamHp;
+    gg.alive = new Set(result.match.state.alive || [...gg.alive]);
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
+  gg.room.send("settings", settings);
   gg.room.send("teams", { teams: gg.teams });
   hostAdvanceRound();
 };
@@ -1310,25 +1343,31 @@ async function hostAdvanceRound() {
   gg.currentGuesses = {}; gg.finishingRound = false;
   gg.roundStartPlayers = gg.room.players();
   gg.hostAnswer = round;
-  // Keep answer coordinates out of round broadcasts.
-  gg.room.send("round", { round: gg.round, total: gg.rounds, pano: round.pano, countryHint: round.countryHint });
+  try {
+    const publicRound = await gg.server.startRound({ pano: round.pano, lat: round.lat, lng: round.lng, countryHint: round.countryHint });
+    gg.round = publicRound.round;
+    gg.room.send("round", publicRound);
+  } catch (error) {
+    gg.round--;
+    alert(error.message);
+  }
 }
 
-function onMpRoundStart(payload) {
+async function onMpRoundStart(payload) {
   // Ignore catch-up broadcasts for an already active round.
   if (gg.screen === "round" && gg.round === payload.round) return;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
 
   if (payload.round === 1) {
-    if (gg.powerups !== false) {
-      gg.myPowerup = randomPowerup();
-      gg.mySabotage = randomSabotage();
-    } else {
-      gg.myPowerup = null;
-      gg.mySabotage = null;
+    try {
+      const state = await gg.server.playerState();
+      gg.myPowerup = state.player.powerup;
+      gg.mySabotage = state.player.sabotage;
+      gg.usedPowerup = state.player.powerupUsed;
+      gg.usedSabotage = state.player.sabotageUsed;
+    } catch (error) {
+      showConnBanner(`${icon("warning", { size: "sm" })} ${escapeHtml(error.message)}`);
     }
-    gg.usedPowerup = false;
-    gg.usedSabotage = false;
   }
   gg.hasShield = false;
   document.getElementById("ggSabotageInk")?.remove();
@@ -1339,9 +1378,10 @@ function onMpRoundStart(payload) {
   // Automatically bank unresolved points before a new round starts.
   document.getElementById("ggWagerOverlay")?.remove();
   if (gg.pendingMpWager) {
-    const pts = gg.pendingMpWager.pts;
-    gg.pendingMpWager = null;
-    ggMpSendWagerResult(pts);
+    try {
+      await ggMpSendWagerResult("bank");
+      gg.pendingMpWager = null;
+    } catch {}
   }
 
   gg.round = payload.round; gg.current = payload; gg.guess = null;
@@ -1373,101 +1413,53 @@ function playerScore() {
   return entry ? entry.total : 0;
 }
 
-function submitMpGuess() {
+async function submitMpGuess() {
   if (!gg.guess) return;
   gg.submitted = true;
-  gg.room.send("guess", { round: gg.round, name: gg.name, lat: gg.guess[1], lng: gg.guess[0], shield: gg.hasShield });
   const info = document.getElementById("ggGuessInfo");
-  if (info) info.textContent = "Gok verstuurd — wachten op andere spelers...";
   const btn = document.getElementById("ggSubmitBtn");
   if (btn) btn.disabled = true;
+  try {
+    await gg.server.submitGuess(gg.round, gg.guess[1], gg.guess[0]);
+    gg.room.send("guess", { round: gg.round });
+    if (info) info.textContent = pick("Guess submitted — waiting for other players…", "Gok verstuurd — wachten op andere spelers...");
+  } catch (error) {
+    gg.submitted = false;
+    if (btn) btn.disabled = false;
+    if (info) info.textContent = error.message;
+  }
 }
 
 function onMpGuessReceived(payload) {
   if (!gg.isHost || payload.round !== gg.round) return;
-  gg.currentGuesses[payload.from] = { name: payload.name, lat: payload.lat, lng: payload.lng, shield: payload.shield };
+  gg.currentGuesses[payload.from] = { submitted: true };
   const expected = gg.gameMode === "br"
     ? gg.roundStartPlayers.filter(p => gg.alive.has(p.playerId)).length
     : gg.roundStartPlayers.length;
   if (Object.keys(gg.currentGuesses).length >= (expected || 1)) hostFinishRound();
 }
 
-function hostFinishRound() {
+async function hostFinishRound() {
   if (!gg.isHost || gg.finishingRound) return;
   gg.finishingRound = true;
-  const answer = { lat: gg.hostAnswer.lat, lng: gg.hostAnswer.lng, countryHint: gg.hostAnswer.countryHint };
-  const guesses = Object.entries(gg.currentGuesses).map(([playerId, g]) => {
-    const km = haversineKm([g.lng, g.lat], [answer.lng, answer.lat]);
-    let pts = scoreForDistance(km);
-    if (g.shield && gg.gameMode !== "duels") pts = Math.min(5000, pts + 1000);
-    if (!gg.scoreboard[playerId]) gg.scoreboard[playerId] = { name: g.name, total: 0 };
-    // Gamble mode defers points; competitive modes always use raw round scores.
-    if (!(gg.difficulty === "gamble" && pts > 0)) {
-      gg.scoreboard[playerId].total += pts;
-    }
-    gg.scoreboard[playerId].name = g.name;
-    return { playerId, name: g.name, lat: g.lat, lng: g.lng, km, pts };
-  });
-
-  // Duels convert the score gap into damage.
-  let damage = {};
-  if (gg.gameMode === "duels" && guesses.length === 2) {
-    const [a, b] = guesses;
-    const aDmg = Math.max(0, a.pts - b.pts);
-    const bDmg = Math.max(0, b.pts - a.pts);
-    damage[a.playerId] = b.shield ? Math.round(aDmg / 2) : aDmg;
-    damage[b.playerId] = a.shield ? Math.round(bDmg / 2) : bDmg;
-    gg.hp[b.playerId] = Math.max(0, (gg.hp[b.playerId] ?? 5000) - damage[a.playerId]);
-    gg.hp[a.playerId] = Math.max(0, (gg.hp[a.playerId] ?? 5000) - damage[b.playerId]);
-    if (gg.hp[a.playerId] <= 0 || gg.hp[b.playerId] <= 0) gg.duelOver = true;
+  try {
+    const results = await gg.server.finishRound(gg.round);
+    gg.room.send("results", { round: results.round, authoritative: true });
+  } catch (error) {
+    showConnBanner(`${icon("warning", { size: "sm" })} ${escapeHtml(error.message)}`);
+  } finally {
+    gg.finishingRound = false;
   }
-
-  // Team duels convert the team score gap into damage.
-  let teamDamage = {};
-  if (gg.gameMode === "teamduels") {
-    let aBest = { pts: 0, shield: false };
-    let bBest = { pts: 0, shield: false };
-    const aTeamGuesses = guesses.filter((g) => gg.teams[g.playerId] === "A");
-    const bTeamGuesses = guesses.filter((g) => gg.teams[g.playerId] === "B");
-    
-    if (aTeamGuesses.length) aBest = aTeamGuesses.reduce((prev, current) => (prev.pts > current.pts) ? prev : current);
-    if (bTeamGuesses.length) bBest = bTeamGuesses.reduce((prev, current) => (prev.pts > current.pts) ? prev : current);
-    
-    const aDmg = Math.max(0, aBest.pts - bBest.pts);
-    const bDmg = Math.max(0, bBest.pts - aBest.pts);
-    
-    teamDamage["A"] = bBest.shield ? Math.round(aDmg / 2) : aDmg;
-    teamDamage["B"] = aBest.shield ? Math.round(bDmg / 2) : bDmg;
-    
-    gg.teamHp.B = Math.max(0, (gg.teamHp.B ?? 5000) - teamDamage["A"]);
-    gg.teamHp.A = Math.max(0, (gg.teamHp.A ?? 5000) - teamDamage["B"]);
-    if (gg.teamHp.A <= 0 || gg.teamHp.B <= 0) gg.duelOver = true;
-  }
-
-  // Battle Royale eliminates the lowest scorer unless everyone ties.
-  let eliminatedThisRound = [];
-  if (gg.gameMode === "br") {
-    const aliveGuesses = guesses.filter((g) => gg.alive.has(g.playerId));
-    if (aliveGuesses.length > 1) {
-      const minPts = Math.min(...aliveGuesses.map((g) => g.pts));
-      const worst = aliveGuesses.filter((g) => g.pts === minPts);
-      if (worst.length < aliveGuesses.length) {
-        worst.forEach((g) => { gg.alive.delete(g.playerId); gg.eliminated.push(g.name); eliminatedThisRound.push(g.name); });
-      }
-    }
-  }
-
-  gg.history.push({ round: gg.round, country: answer.countryHint, guesses });
-  gg.room.send("results", {
-    round: gg.round, total: gg.rounds, answer, guesses, scoreboard: gg.scoreboard,
-    gameMode: gg.gameMode, damage, hp: gg.hp, teamHp: gg.teamHp, teamDamage,
-    eliminatedThisRound, eliminated: gg.eliminated, alive: [...gg.alive], duelOver: gg.duelOver,
-  });
-  gg.finishingRound = false;
 }
 
-function onMpResults(payload) {
+async function onMpResults(payload) {
   if (payload.round !== gg.round) return;
+  try {
+    payload = await gg.server.roundResults(payload.round);
+  } catch (error) {
+    showConnBanner(`${icon("warning", { size: "sm" })} ${escapeHtml(error.message)}`);
+    return;
+  }
   clearRoundTimer();
   gg.screen = "results";
   gg.lastResultsPayload = payload;
@@ -1635,7 +1627,7 @@ const ggMpNextFromHost = function () {
 };
 
 
-function onMpGameOver(payload) {
+async function onMpGameOver(payload) {
   gg.screen = "gameover";
   gg.lastGameOverPayload = payload;
   if (gg.resultMap) { clearGoogleMap(gg.resultMap); gg.resultMap = null; }
@@ -1644,11 +1636,11 @@ function onMpGameOver(payload) {
   // Bank unresolved final-round points before accepting the final scoreboard.
   gg.scoreboard = payload.scoreboard;
   if (gg.pendingMpWager) {
-    const pts = gg.pendingMpWager.pts;
-    gg.pendingMpWager = null;
-    if (!gg.scoreboard[gg.playerId]) gg.scoreboard[gg.playerId] = { name: gg.name, total: 0 };
-    gg.scoreboard[gg.playerId].total += pts;
-    gg.room.send("wager", { round: gg.round, playerId: gg.playerId, name: gg.name, delta: pts });
+    try {
+      const result = await ggMpSendWagerResult("bank");
+      gg.scoreboard = result.scoreboard;
+      gg.pendingMpWager = null;
+    } catch {}
   }
   if (payload.hp) gg.hp = payload.hp;
   if (payload.teamScore) gg.teamScore = payload.teamScore;
@@ -1961,14 +1953,6 @@ const ggResolveWager = function () {
   if (nextBtn) nextBtn.style.display = "";
 };
 
-// The host applies each player's final gamble result to the shared scoreboard.
-function onMpWagerReceived(payload) {
-  if (!gg.isHost) return;
-  if (!gg.scoreboard[payload.playerId]) gg.scoreboard[payload.playerId] = { name: payload.name || "Speler", total: 0 };
-  gg.scoreboard[payload.playerId].total += payload.delta;
-  gg.room.send("scoreupdate", { scoreboard: gg.scoreboard });
-}
-
 // Update only the live scoreboard so open gamble overlays remain intact.
 function onMpScoreUpdateReceived(payload) {
   gg.scoreboard = payload.scoreboard;
@@ -1980,25 +1964,26 @@ function onMpScoreUpdateReceived(payload) {
     .join("");
 }
 
-// Apply local gamble results optimistically before host confirmation.
-function ggMpSendWagerResult(delta) {
-  if (!gg.scoreboard[gg.playerId]) gg.scoreboard[gg.playerId] = { name: gg.name, total: 0 };
-  gg.scoreboard[gg.playerId].total += delta;
-  gg.room.send("wager", { round: gg.round, playerId: gg.playerId, name: gg.name, delta });
-  const list = document.getElementById("ggMpTotalScoreList");
-  if (list) {
-    list.innerHTML = Object.values(gg.scoreboard).sort((a, b) => b.total - a.total)
-      .map((s) => `<div class="gitem"><div class="name">${escapeHtml(s.name)}</div><div></div><div></div><div class="prox">${s.total} pts</div></div>`)
-      .join("");
+async function ggMpSendWagerResult(choice = "bank") {
+  try {
+    const result = await gg.server.wager(gg.round, choice);
+    gg.scoreboard = result.scoreboard;
+    gg.room.send("scoreupdate", { scoreboard: result.scoreboard });
+    onMpScoreUpdateReceived({ scoreboard: result.scoreboard });
+    return result;
+  } catch (error) {
+    showConnBanner(`${icon("warning", { size: "sm" })} ${escapeHtml(error.message)}`);
+    throw error;
   }
 }
 
-const ggMpBankPoints = function () {
+const ggMpBankPoints = async function () {
   if (!gg.pendingMpWager) return;
-  const pts = gg.pendingMpWager.pts;
-  gg.pendingMpWager = null;
-  document.getElementById("ggMpWagerPanel")?.remove();
-  ggMpSendWagerResult(pts);
+  try {
+    await ggMpSendWagerResult("bank");
+    gg.pendingMpWager = null;
+    document.getElementById("ggMpWagerPanel")?.remove();
+  } catch {}
 };
 
 const ggMpOpenWager = function () {
@@ -2039,13 +2024,19 @@ const ggMpOpenWager = function () {
   });
 };
 
-function ggMpWagerSpin(chosen) {
+async function ggMpWagerSpin(chosen) {
   const overlay = document.getElementById("ggWagerOverlay");
   if (!overlay || !gg.pendingMpWager) return;
   const numberEl = document.getElementById("ggWagerNumber");
   overlay.querySelectorAll("button").forEach((b) => b.disabled = true);
 
-  const pts = gg.pendingMpWager.pts;
+  let result;
+  try {
+    result = await ggMpSendWagerResult(chosen);
+  } catch {
+    overlay.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+    return;
+  }
   gg.pendingMpWager = null;
   document.getElementById("ggMpWagerPanel")?.remove();
 
@@ -2057,15 +2048,12 @@ function ggMpWagerSpin(chosen) {
     ticks++;
     if (ticks > 16) {
       clearInterval(spinTimer);
-      const finalN = Math.floor(Math.random() * 37);
+      const finalN = result.number;
       const finalColor = rouletteColor(finalN);
       numberEl.textContent = finalN;
       numberEl.className = `gg-roulette-number gg-roulette-${finalColor}`;
-      const won = finalColor === chosen;
       const mult = chosen === "green" ? 5 : 2;
-      const payout = won ? pts * mult : 0;
-      ggMpSendWagerResult(payout);
-      ggMpWagerShowResult(won, payout, mult);
+      ggMpWagerShowResult(result.won, result.payout, mult);
     }
   }, 80);
 }
@@ -2083,25 +2071,30 @@ function ggMpWagerShowResult(won, payout, mult) {
   actions.innerHTML = `<button class="btn primary" data-action="cancel-wager" style="width:100%;">Verder ${icon("chevronRight", { size: "sm" })}</button>`;
 }
 
-const ggUsePowerup = function () {
+const ggUsePowerup = async function () {
   if (gg.usedPowerup) return;
+  const button = document.getElementById("ggBtnPowerup");
+  if (button) button.disabled = true;
+  let result;
+  try {
+    result = await gg.server.usePowerup();
+  } catch (error) {
+    if (button) button.disabled = false;
+    showConnBanner(`${icon("warning", { size: "sm" })} ${escapeHtml(error.message)}`);
+    return;
+  }
   gg.usedPowerup = true;
-  document.getElementById("ggBtnPowerup").disabled = true;
-  document.getElementById("ggBtnPowerup").style.opacity = "0.5";
+  if (button) button.style.opacity = "0.5";
 
-  if (gg.myPowerup === "shield") {
+  if (result.type === "shield") {
     gg.hasShield = true;
     showConnBanner(`${icon("star", { size: "sm" })} Schild geactiveerd! (beschermt deels tegen duel schade of geeft score boost)`);
     setTimeout(() => hideConnBanner(), 3000);
-  } else if (gg.myPowerup === "hint") {
-    showConnBanner(`💡 Echte Hint: Het is <strong>${gg.current.countryHint}</strong>`);
+  } else if (result.type === "hint") {
+    showConnBanner(`💡 Echte Hint: Het is <strong>${escapeHtml(result.countryHint)}</strong>`);
     setTimeout(() => hideConnBanner(), 5000);
-  } else if (gg.myPowerup === "5050") {
-    const others = ["Nederland", "België", "Duitsland", "Frankrijk", "Spanje", "Italië", "Verenigde Staten", "Japan", "Brazilië", "Australië", "Zuid-Afrika"];
-    let other = others[Math.floor(Math.random() * others.length)];
-    if (other === gg.current.countryHint) other = "Canada";
-    const options = [gg.current.countryHint, other].sort(() => Math.random() - 0.5);
-    showConnBanner(`💡 50/50: Het is <strong>${options[0]}</strong> of <strong>${options[1]}</strong>`);
+  } else if (result.type === "5050") {
+    showConnBanner(`💡 50/50: Het is <strong>${result.options.map(escapeHtml).join("</strong> of <strong>")}</strong>`);
     setTimeout(() => hideConnBanner(), 5000);
   }
 };
@@ -2139,15 +2132,24 @@ const ggUseSabotageMenu = function () {
   });
 };
 
-const ggSendSabotage = function (targetId) {
+const ggSendSabotage = async function (targetId) {
   document.getElementById("ggSabotageMenu")?.remove();
   if (gg.usedSabotage) return;
   const targetName = gg.scoreboard[targetId]?.name || pick("Player", "Speler");
+  const button = document.getElementById("ggBtnSabotage");
+  if (button) button.disabled = true;
+  let sabotage;
+  try {
+    sabotage = await gg.server.useSabotage(targetId);
+  } catch (error) {
+    if (button) button.disabled = false;
+    showConnBanner(`${icon("warning", { size: "sm" })} ${escapeHtml(error.message)}`);
+    return;
+  }
   gg.usedSabotage = true;
-  document.getElementById("ggBtnSabotage").disabled = true;
-  document.getElementById("ggBtnSabotage").style.opacity = "0.5";
+  if (button) button.style.opacity = "0.5";
 
-  gg.room.send("sabotage", { target: targetId, sabotageType: gg.mySabotage, fromName: gg.name });
+  gg.room.send("sabotage", sabotage);
   showConnBanner(`${icon("alertTriangle", { size: "sm" })} ${pick("Used", "Sabotage")} '${bonusLabel(gg.mySabotage, getLanguage())}' ${pick("on", "ingezet op")} ${escapeHtml(targetName)}!`);
   setTimeout(() => hideConnBanner(), 3000);
 };

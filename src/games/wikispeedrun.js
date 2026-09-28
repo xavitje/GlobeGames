@@ -6,6 +6,7 @@ import { getLanguage, pick } from "../lib/i18n.js";
 import { escapeHtml } from "../lib/html.js";
 import { fetchWikiIntro, fetchWikiPage, fetchWikiPreviewInfo, fetchWikiRandom, fetchWikiSearch, resolveWikiTitle } from "./wikispeedrun/wiki-api.js";
 import { ActionController } from "../lib/actions.js";
+import { parseWikiRoute, wikiArticlePath, wikiLobbyPath } from "./wikispeedrun/routes.js";
 
 let app;
 let ws = null;
@@ -146,12 +147,12 @@ function attachWikiAutocomplete(inputId, onChange) {
   });
 }
 
-// Shared lobby links use /wikispeedrun/<CODE>.
+// Keep lobby and in-game article routes unambiguous.
 function setUrlPath(path) {
   history.replaceState(null, "", path);
 }
 function setLobbyInUrl(code) {
-  setUrlPath(code ? `/wikispeedrun/${code.toUpperCase()}` : "/wikispeedrun");
+  setUrlPath(code ? wikiLobbyPath(code) : "/wikispeedrun");
 }
 function clearLobbyFromUrl() { setUrlPath("/wikispeedrun"); }
 
@@ -182,7 +183,7 @@ export function renderWikiSpeedrun(container, routeSegments = []) {
   teardown();
   actionController = new ActionController(app, WIKI_ACTIONS);
 
-  const [code] = routeSegments;
+  const route = parseWikiRoute(routeSegments);
   ws = {
     room: null,
     playerId: randomPlayerId(),
@@ -202,7 +203,7 @@ export function renderWikiSpeedrun(container, routeSegments = []) {
   };
   window.addEventListener("popstate", handleExternalNavigate);
 
-  if (code) joinByCode(code.toUpperCase());
+  if (route.type === "lobby") joinByCode(route.code);
   else showMenu();
 }
 
@@ -434,6 +435,7 @@ const wsAutoJoin = function (code) {
 
 async function enterLobby(code) {
   code = code.toUpperCase();
+  ws.lobbyCode = code;
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${code}</h2><div class="desc">${pick("Connecting…", "Verbinden…")}</div></div></div>`;
@@ -484,7 +486,7 @@ function scheduleSync() {
 }
 
 function drawLobby() {
-  const shareUrl = `${location.origin}/wikispeedrun/${ws.room.code}`;
+  const shareUrl = `${location.origin}${wikiLobbyPath(ws.lobbyCode || ws.room.code)}`;
   app.innerHTML = `
     ${topbar()}
     <div class="gametitle"><div><h2>${icon("users", { size: "sm" })} Lobby ${ws.room.code}</h2><div class="desc">${ws.isHost ? pick("Share the link with your friends.", "Deel de link met je vrienden.") : pick("Waiting for the host to start…", "Wachten tot de host het spel start…")}</div></div></div>
@@ -795,6 +797,7 @@ function buildTableOfContents(bodyEl) {
 
 const wsHandleLinkClick = function (e, targetTitle) {
   e.preventDefault();
+  e.stopPropagation();
   if (ws.endTime) return; // al klaar
 
   ws.clicks++;
@@ -816,6 +819,7 @@ async function loadArticle(title) {
     const page = await fetchWikiPage(ws.lang, title);
 
     if (ws.visited[ws.visited.length - 1] !== page.title) ws.visited.push(page.title);
+    setUrlPath(wikiArticlePath(page.title));
     renderTrail();
 
     if (ws.room) ws.room.send("progress", { clicks: ws.clicks, current: page.title });

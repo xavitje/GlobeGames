@@ -1,0 +1,4 @@
+project_id = "globegames"
+
+[functions.multiplayer-action]
+verify_jwt = false
