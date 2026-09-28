@@ -55,11 +55,11 @@ export async function signUpWithEmail(email, password, displayName) {
   return data;
 }
 
-export async function updateAccount({ displayName, color }) {
+export async function updateAccount({ displayName, color, avatar }) {
   const client = getSupabase();
   if (!client) throw new Error("Supabase is not configured.");
   const { data, error } = await client.auth.updateUser({
-    data: { display_name: displayName, color },
+    data: { display_name: displayName, color, avatar },
   });
   if (error) throw error;
   return data.user;

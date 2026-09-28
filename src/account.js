@@ -11,6 +11,8 @@ import {
   updateAccount,
 } from "./lib/auth.js";
 import { getProfile, saveProfile, syncProfileFromSession } from "./lib/profile.js";
+import { AVATAR_PRESETS, avatarHtml, normalizeAvatar } from "./lib/avatar.js";
+import { pendingAuthReturn, rememberAuthReturn, takeAuthReturn } from "./lib/auth-return.js";
 
 let root = null;
 let session = null;
@@ -33,8 +35,19 @@ function userColor() {
   return session?.user?.user_metadata?.color || getProfile().color || PLAYER_COLORS[0];
 }
 
-function initials(name) {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+function userAvatar() {
+  return normalizeAvatar(session?.user?.user_metadata?.avatar || getProfile().avatar);
+}
+
+function userAvatarUrl() {
+  return session?.user?.user_metadata?.avatar_url || session?.user?.user_metadata?.picture || getProfile().avatarUrl || "";
+}
+
+function continueAfterAuth() {
+  const destination = takeAuthReturn();
+  if (!destination) return false;
+  location.replace(destination);
+  return true;
 }
 
 export async function renderAccount(container) {
@@ -42,7 +55,10 @@ export async function renderAccount(container) {
   root.innerHTML = `${appHeader()}<div class="account-loading"><span class="atlas-loader"></span>${pick("Loading your account…", "Je account laden…")}</div>`;
   try {
     session = await getSession();
-    if (session) syncProfileFromSession(session);
+    if (session) {
+      syncProfileFromSession(session);
+      if (continueAfterAuth()) return;
+    }
   } catch { session = null; }
   draw();
 }
@@ -91,6 +107,7 @@ function wireAuth() {
   });
   document.getElementById("accountGoogle")?.addEventListener("click", async () => {
     setBusy(true);
+    rememberAuthReturn(pendingAuthReturn());
     try { await signInWithGoogle(); } catch (error) { showAuthMessage(error.message, true); setBusy(false); }
   });
   document.getElementById("accountAuthForm")?.addEventListener("submit", async (event) => {
@@ -108,7 +125,8 @@ function wireAuth() {
         showAuthMessage(pick("Check your inbox to confirm your email address.", "Controleer je inbox om je e-mailadres te bevestigen."));
         setBusy(false);
       } else {
-        draw();
+        syncProfileFromSession(session);
+        if (!continueAfterAuth()) draw();
       }
     } catch (error) {
       showAuthMessage(error.message, true);
@@ -131,10 +149,12 @@ function showAuthMessage(message, error = false) {
 function settingsHtml() {
   const name = userName();
   const color = userColor();
+  const avatar = userAvatar();
+  const avatarUrl = userAvatarUrl();
   const lang = getLanguage();
   return `<main class="account-settings-shell">
     <section class="account-settings-head">
-      <span class="account-avatar" style="--avatar-color:${color}">${esc(initials(name))}</span>
+      <div id="accountHeaderAvatar">${avatarHtml({ avatar, avatarUrl, name })}</div>
       <div><span class="atlas-overline">${pick("SIGNED IN AS", "INGELOGD ALS")}</span><h1>${esc(name)}</h1><p>${esc(session.user.email)}</p></div>
       <button class="account-secondary" id="accountSignOut" type="button">${pick("Sign out", "Uitloggen")}</button>
     </section>
@@ -148,8 +168,12 @@ function settingsHtml() {
         <div class="settings-pane ${settingsSection === "profile" ? "active" : ""}" data-settings-pane="profile">
           <div class="settings-section-heading"><div><h2>${pick("Public profile", "Openbaar profiel")}</h2><p>${pick("This is how other players see you in lobbies and leaderboards.", "Zo zien andere spelers je in lobby's en ranglijsten.")}</p></div></div>
           <form id="accountSettingsForm">
-          <div class="account-avatar-row"><span class="account-avatar large" id="settingsAvatar" style="--avatar-color:${color}">${esc(initials(name))}</span><div><strong>${esc(name)}</strong><small>${pick("Avatar images are coming later. Choose your player colour now.", "Profielfoto's komen later. Kies nu je spelerskleur.")}</small></div></div>
-          <label>${pick("Display name", "Weergavenaam")}<input id="settingsName" maxlength="30" required value="${esc(name)}"></label>
+          <div class="account-avatar-row"><div id="settingsAvatarPreview">${avatarHtml({ avatar, avatarUrl, name, className: "large" })}</div><div><strong id="settingsProfileName">${esc(name)}</strong><small>${pick("Choose a profile image and player colour.", "Kies een profielfoto en spelerskleur.")}</small></div></div>
+          <label>${pick("Display name", "Weergavenaam")}<input id="settingsName" maxlength="18" required value="${esc(name)}"></label>
+          <fieldset><legend>${pick("Profile picture", "Profielfoto")}</legend><div class="settings-avatars">
+            ${avatarUrl ? `<button type="button" data-avatar="google" class="${avatar === "google" ? "active" : ""}" aria-label="Google profile picture">${avatarHtml({ avatar: "google", avatarUrl, name })}<span>Google</span></button>` : ""}
+            ${AVATAR_PRESETS.map((item) => `<button type="button" data-avatar="${item.id}" class="${avatar === item.id ? "active" : ""}" aria-label="${item.label}">${avatarHtml({ avatar: item.id, name })}<span>${item.label}</span></button>`).join("")}
+          </div></fieldset>
           <fieldset><legend>${pick("Player colour", "Spelerskleur")}</legend><div class="settings-colours">${PLAYER_COLORS.map((item) => `<button type="button" aria-label="${item}" data-color="${item}" class="${item === color ? "active" : ""}" style="--swatch:${item}"></button>`).join("")}</div></fieldset>
           <div class="settings-form-footer"><span id="settingsMessage" aria-live="polite"></span><button class="account-primary" type="submit">${pick("Save changes", "Wijzigingen opslaan")}</button></div>
           </form>
@@ -169,6 +193,8 @@ function settingsHtml() {
 
 function wireSettings() {
   let selectedColor = userColor();
+  let selectedAvatar = userAvatar();
+  const avatarUrl = userAvatarUrl();
   root.querySelectorAll("[data-settings-section]").forEach((button) => {
     button.addEventListener("click", () => {
       settingsSection = button.dataset.settingsSection;
@@ -185,7 +211,13 @@ function wireSettings() {
     button.addEventListener("click", () => {
       selectedColor = button.dataset.color;
       root.querySelectorAll(".settings-colours button").forEach((item) => item.classList.toggle("active", item === button));
-      document.getElementById("settingsAvatar").style.setProperty("--avatar-color", selectedColor);
+    });
+  });
+  root.querySelectorAll(".settings-avatars button").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedAvatar = button.dataset.avatar;
+      root.querySelectorAll(".settings-avatars button").forEach((item) => item.classList.toggle("active", item === button));
+      document.getElementById("settingsAvatarPreview").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl, name: document.getElementById("settingsName").value, className: "large" });
     });
   });
   document.getElementById("accountSettingsForm")?.addEventListener("submit", async (event) => {
@@ -193,10 +225,13 @@ function wireSettings() {
     const name = document.getElementById("settingsName").value.trim();
     const message = document.getElementById("settingsMessage");
     try {
-      const user = await updateAccount({ displayName: name, color: selectedColor });
-      saveProfile({ name, color: selectedColor });
+      const user = await updateAccount({ displayName: name, color: selectedColor, avatar: selectedAvatar });
+      saveProfile({ name, color: selectedColor, avatar: selectedAvatar, avatarUrl });
       session = { ...session, user };
       message.textContent = pick("Saved", "Opgeslagen") + " ✓";
+      document.getElementById("settingsProfileName").textContent = name;
+      document.querySelector(".account-settings-head h1").textContent = name;
+      document.getElementById("accountHeaderAvatar").innerHTML = avatarHtml({ avatar: selectedAvatar, avatarUrl, name });
     } catch (error) {
       message.textContent = error.message;
       message.classList.add("error");

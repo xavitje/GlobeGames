@@ -1,4 +1,5 @@
 import { PLAYER_COLORS } from "../core.js";
+import { normalizeAvatar } from "./avatar.js";
 
 const KEY = "gg_profile";
 const USER_KEY = "gg_profile_user_id";
@@ -9,10 +10,10 @@ export function getProfile() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      return { name: p.name || "", color: p.color || COLORS[0] };
+      return { name: p.name || "", color: p.color || COLORS[0], avatar: normalizeAvatar(p.avatar), avatarUrl: p.avatarUrl || "" };
     }
   } catch (e) {}
-  return { name: "", color: COLORS[0] };
+  return { name: "", color: COLORS[0], avatar: "atlas", avatarUrl: "" };
 }
 
 export function saveProfile(profile) {
@@ -38,6 +39,8 @@ export function syncProfileFromSession(session) {
   const next = {
     name: previousUserId === user.id && current.name ? current.name : accountName,
     color: metadata.color || current.color,
+    avatar: normalizeAvatar(metadata.avatar || (previousUserId === user.id && current.avatar) || (metadata.avatar_url ? "google" : "atlas")),
+    avatarUrl: metadata.avatar_url || metadata.picture || current.avatarUrl || "",
   };
   saveProfile(next);
   try { localStorage.setItem(USER_KEY, user.id); } catch {}

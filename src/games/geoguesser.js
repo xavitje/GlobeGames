@@ -20,6 +20,7 @@ import { escapeHtml } from "../lib/html.js";
 import { ActionController } from "../lib/actions.js";
 import { getSession } from "../lib/auth.js";
 import { MultiplayerServer } from "../lib/multiplayer-server.js";
+import { accountSignInPath, rememberAuthReturn } from "../lib/auth-return.js";
 import { buildPointFn, difficultySettingHtml, locationSetLabel, locationSettingHtml, readDifficultySetting, readLocationSetting, readTimerSetting, timerSettingHtml, wireDifficultySetting, wireLocationSetting, wireTimerSetting } from "./geoguesser/settings.js";
 
 let app;
@@ -216,10 +217,20 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
   if (section === "singleplayer") { ggShowSoloSettings(); return; }
 
   if (section === "multiplayer" && subCode) {
+    if (subCode === "host") {
+      openProtectedMultiplayer("/geoguesser/multiplayer/host", () => ggShowMpHostSettings());
+      return;
+    }
+    if (subCode === "join") {
+      openProtectedMultiplayer("/geoguesser/multiplayer/join", () => ggShowMpJoin());
+      return;
+    }
     const code = subCode.toUpperCase();
     if (hasMultiplayerConfig()) {
-      if (savedLobby && savedLobby.code === code) drawReconnectPrompt(savedLobby);
-      else drawAutoJoinScreen(code);
+      openProtectedMultiplayer(`/geoguesser/multiplayer/${code}`, () => {
+        if (savedLobby && savedLobby.code === code) drawReconnectPrompt(savedLobby);
+        else drawAutoJoinScreen(code);
+      });
     } else {
       drawStartScreen();
     }
@@ -234,6 +245,18 @@ export function renderGeoGuesser(rootEl, routeSegments = []) {
 
   if (savedLobby) { drawReconnectPrompt(savedLobby); return; }
   drawStartScreen();
+}
+
+async function openProtectedMultiplayer(returnTo, onReady) {
+  app.innerHTML = `${topbar()}<div class="route-loading"><span class="atlas-loader"></span>${pick("Checking your account…", "Je account controleren…")}</div>`;
+  try {
+    if (await getSession()) {
+      onReady();
+      return;
+    }
+  } catch {}
+  rememberAuthReturn(returnTo);
+  location.assign(accountSignInPath(returnTo));
 }
 
 function drawReconnectPrompt(saved) {
@@ -769,6 +792,7 @@ const ggShowMultiplayerMenu = function () {
 };
 
 const ggShowMpHostSettings = function (prefill = {}) {
+  setUrlPath("/geoguesser/multiplayer/host");
   const ar = prefill.rounds || 5;
   app.innerHTML = `
     ${topbar()}
@@ -812,6 +836,7 @@ const ggShowMpHostSettings = function (prefill = {}) {
 
 // Split the room code into keyboard-friendly character boxes.
 const ggShowMpJoin = function (prefill = {}) {
+  setUrlPath("/geoguesser/multiplayer/join");
   const codeLen = 4;
   app.innerHTML = `
     ${topbar()}
@@ -967,7 +992,7 @@ async function enterLobby(code, name, isHost, settings, existingPlayerId) {
       <div class="card" style="cursor:default; text-align:center;">
         ${icon("lockClosed", { size: "xl" })}<h3>${pick("Sign-in required", "Inloggen vereist")}</h3>
         <p>${escapeHtml(error.message)}</p>
-        <a class="btn primary" href="/account" style="margin-top:10px;">${pick("Go to account", "Naar account")}</a>
+        <a class="btn primary" href="${accountSignInPath(location.pathname)}" style="margin-top:10px;">${pick("Go to account", "Naar account")}</a>
       </div>`;
     return;
   }
@@ -2251,8 +2276,8 @@ const GEO_ACTIONS = {
   "open-wager": () => ggOpenWager(),
   "replay-solo-settings": () => ggReplaySoloSettings(),
   "show-multiplayer-menu": () => ggShowMultiplayerMenu(),
-  "show-host-settings": () => ggShowMpHostSettings(),
-  "show-mp-join": () => ggShowMpJoin(),
+  "show-host-settings": () => openProtectedMultiplayer("/geoguesser/multiplayer/host", () => ggShowMpHostSettings()),
+  "show-mp-join": () => openProtectedMultiplayer("/geoguesser/multiplayer/join", () => ggShowMpJoin()),
   "host-lobby": () => ggHostLobby(),
   "randomize-teams": () => ggRandomizeTeams(),
   "copy-link": () => ggCopyLink(),
