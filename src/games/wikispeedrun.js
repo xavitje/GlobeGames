@@ -7,6 +7,7 @@ import { escapeHtml } from "../lib/html.js";
 import { fetchWikiIntro, fetchWikiPage, fetchWikiPreviewInfo, fetchWikiRandom, fetchWikiSearch, resolveWikiTitle } from "./wikispeedrun/wiki-api.js";
 import { ActionController } from "../lib/actions.js";
 import { parseWikiRoute, wikiArticlePath, wikiLobbyPath } from "./wikispeedrun/routes.js";
+import { router } from "../main.js";
 
 let app;
 let ws = null;
@@ -150,6 +151,25 @@ function attachWikiAutocomplete(inputId, onChange) {
 // Keep lobby and in-game article routes unambiguous.
 function setUrlPath(path) {
   history.replaceState(null, "", path);
+  // This URL change is in-game bookkeeping, not a route change: tell the
+  // router so its idea of the current path stays in sync with the real URL.
+  router.syncPath();
+}
+
+// Jump to a section/footnote inside the current article WITHOUT touching the
+// URL. Letting the browser do a native "#hash" navigation fires popstate,
+// which the app router treats as navigation and re-renders the whole route
+// (losing the run). The article lives in its own scroll box
+// (#wsWikiContainer), so we scroll that box ourselves.
+function scrollWikiToAnchor(rawId) {
+  const container = document.getElementById("wsWikiContainer");
+  if (!container || !rawId) return;
+  let id = rawId;
+  try { id = decodeURIComponent(rawId); } catch (e) {}
+  const target = document.getElementById(id) || document.getElementById(id.replace(/ /g, "_"));
+  if (!target || !container.contains(target)) return;
+  const offset = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  container.scrollTo({ top: container.scrollTop + offset - 12, behavior: "smooth" });
 }
 function setLobbyInUrl(code) {
   setUrlPath(code ? wikiLobbyPath(code) : "/wikispeedrun");
@@ -814,6 +834,7 @@ async function loadArticle(title) {
 
   container.innerHTML = `<h2 style="text-align:center; margin-top:50px;">${pick("Loading", "Laden van")} <em>${title}</em>…</h2>`;
   window.scrollTo(0, 0);
+  container.scrollTop = 0; // the article scrolls inside this box, not the window
 
   try {
     const page = await fetchWikiPage(ws.lang, title);
@@ -865,14 +886,22 @@ async function loadArticle(title) {
         } catch (e) {
           // Ignore malformed encoded titles.
         }
-        targetTitle = targetTitle.replace(/_/g, " ").split("#")[0];
-        if (targetTitle) {
+        const [titlePart, fragment] = targetTitle.replace(/_/g, " ").split("#");
+        targetTitle = titlePart;
+        if (fragment && targetTitle.toLowerCase() === page.title.toLowerCase()) {
+          // A link to a section of the article we're already on: just scroll.
+          a.href = "#";
+          a.onclick = (e) => { e.preventDefault(); scrollWikiToAnchor(fragment.replace(/ /g, "_")); };
+        } else if (targetTitle) {
           a.href = "#";
           a.onclick = (e) => wsHandleLinkClick(e, targetTitle);
           attachLinkPreview(a, targetTitle);
         }
       } else if (href && href.startsWith("#")) {
-        // Same-page anchors scroll normally and do not count as race clicks.
+        // Same-page anchors (table of contents, footnote [1] and "^" links):
+        // scroll inside the article ourselves; never a race click and never
+        // a URL change (see scrollWikiToAnchor).
+        a.onclick = (e) => { e.preventDefault(); scrollWikiToAnchor(href.slice(1)); };
       } else if (href) {
         // Non-article destinations (Portal:/Wikipedia:/Talk: namespaces,
         // sister-project links to Wiktionary/Commons/Wikiquote/etc., real
