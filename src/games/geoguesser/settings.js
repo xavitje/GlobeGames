@@ -15,7 +15,7 @@ const LOCATION_LABELS = {
   landmarks: ["Famous landmarks", "Beroemde bezienswaardigheden"],
 };
 
-const countries = Object.keys(GEO_POINTS).sort((a, b) => countryName(a).localeCompare(countryName(b)));
+const countries = [...LOCATION_SETS.world.countries].sort((a, b) => countryName(a).localeCompare(countryName(b)));
 
 function resolveLocationSet(location) {
   if (location?.type === "country" && GEO_POINTS[location.name]) {

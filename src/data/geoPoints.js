@@ -541,25 +541,25 @@ export const GEO_POINTS = {
     { name: "Guatemala City", lat: 14.63, lon: -90.52 },
   ],
   "Beroemde Bezienswaardigheden": [
-    { name: "Eiffeltoren (Frankrijk)", lat: 48.8584, lon: 2.2945 },
-    { name: "Taj Mahal (India)", lat: 27.1751, lon: 78.0421 },
-    { name: "Vrijheidsbeeld (VS)", lat: 40.6892, lon: -74.0445 },
-    { name: "Colosseum (Italië)", lat: 41.8902, lon: 12.4922 },
-    { name: "Machu Picchu (Peru)", lat: -13.1631, lon: -72.5450 },
-    { name: "Sydney Opera House (Australië)", lat: -33.8568, lon: 151.2153 },
-    { name: "Grote Muur van China", lat: 40.4319, lon: 116.5704 },
-    { name: "Piramide van Cheops (Egypte)", lat: 29.9792, lon: 31.1342 },
-    { name: "Christus de Verlosser (Brazilië)", lat: -22.9519, lon: -43.2105 },
-    { name: "Stonehenge (VK)", lat: 51.1789, lon: -1.8262 },
-    { name: "Burj Khalifa (VAE)", lat: 25.1972, lon: 55.2744 },
-    { name: "Mount Rushmore (VS)", lat: 43.8791, lon: -103.4591 },
-    { name: "Chichén Itzá (Mexico)", lat: 20.6843, lon: -88.5678 },
-    { name: "Acropolis (Griekenland)", lat: 37.9715, lon: 23.7257 },
-    { name: "Golden Gate Bridge (VS)", lat: 37.8199, lon: -122.4783 },
-    { name: "Toren van Pisa (Italië)", lat: 43.7230, lon: 10.3966 },
-    { name: "Angkor Wat (Cambodja)", lat: 13.4125, lon: 103.8670 },
-    { name: "Big Ben (VK)", lat: 51.5007, lon: -0.1246 },
-    { name: "Sagrada Familia (Spanje)", lat: 41.4036, lon: 2.1744 }
+    { name: "Eiffeltoren (Frankrijk)", country: "France", lat: 48.8584, lon: 2.2945 },
+    { name: "Taj Mahal (India)", country: "India", lat: 27.1751, lon: 78.0421 },
+    { name: "Vrijheidsbeeld (VS)", country: "United States of America", lat: 40.6892, lon: -74.0445 },
+    { name: "Colosseum (Italië)", country: "Italy", lat: 41.8902, lon: 12.4922 },
+    { name: "Machu Picchu (Peru)", country: "Peru", lat: -13.1631, lon: -72.5450 },
+    { name: "Sydney Opera House (Australië)", country: "Australia", lat: -33.8568, lon: 151.2153 },
+    { name: "Grote Muur van China", country: "China", lat: 40.4319, lon: 116.5704 },
+    { name: "Piramide van Cheops (Egypte)", country: "Egypt", lat: 29.9792, lon: 31.1342 },
+    { name: "Christus de Verlosser (Brazilië)", country: "Brazil", lat: -22.9519, lon: -43.2105 },
+    { name: "Stonehenge (VK)", country: "United Kingdom", lat: 51.1789, lon: -1.8262 },
+    { name: "Burj Khalifa (VAE)", country: "United Arab Emirates", lat: 25.1972, lon: 55.2744 },
+    { name: "Mount Rushmore (VS)", country: "United States of America", lat: 43.8791, lon: -103.4591 },
+    { name: "Chichén Itzá (Mexico)", country: "Mexico", lat: 20.6843, lon: -88.5678 },
+    { name: "Acropolis (Griekenland)", country: "Greece", lat: 37.9715, lon: 23.7257 },
+    { name: "Golden Gate Bridge (VS)", country: "United States of America", lat: 37.8199, lon: -122.4783 },
+    { name: "Toren van Pisa (Italië)", country: "Italy", lat: 43.7230, lon: 10.3966 },
+    { name: "Angkor Wat (Cambodja)", country: "Cambodia", lat: 13.4125, lon: 103.8670 },
+    { name: "Big Ben (VK)", country: "United Kingdom", lat: 51.5007, lon: -0.1246 },
+    { name: "Sagrada Familia (Spanje)", country: "Spain", lat: 41.4036, lon: 2.1744 }
   ],
 };
 
@@ -593,21 +593,23 @@ export const CONTINENT_MAP = {
   ],
 };
 
+const STANDARD_COUNTRIES = Object.keys(GEO_POINTS).filter((country) => country !== "Beroemde Bezienswaardigheden");
+
 // Location sets optionally restrict selection to capital points.
 export const LOCATION_SETS = {
   world: {
     label: "Hele wereld",
-    countries: Object.keys(GEO_POINTS),
+    countries: STANDARD_COUNTRIES,
     onlyCapital: false,
   },
   capitals: {
     label: "Hoofdsteden",
-    countries: Object.keys(GEO_POINTS),
+    countries: STANDARD_COUNTRIES,
     onlyCapital: true,
   },
   bigcities: {
     label: "Grote steden",
-    countries: Object.keys(GEO_POINTS).filter((c) => GEO_POINTS[c].length > 1),
+    countries: STANDARD_COUNTRIES.filter((country) => GEO_POINTS[country].length > 1),
     onlyCapital: false,
   },
   europe: {

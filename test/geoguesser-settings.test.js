@@ -14,3 +14,14 @@ test("capital sets always select the capital point", () => {
   assert.equal(typeof point.lon, "number");
 });
 
+test("landmarks use their actual country as the answer", () => {
+  const point = buildPointFn("landmarks", () => 0.16)();
+  assert.equal(point.name, "Vrijheidsbeeld (VS)");
+  assert.equal(point.country, "United States of America");
+});
+
+test("standard world rounds never expose the landmark category as a country", () => {
+  const point = buildPointFn("world", () => 0.999)();
+  assert.notEqual(point.country, "Beroemde Bezienswaardigheden");
+});
+
